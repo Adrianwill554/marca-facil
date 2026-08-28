@@ -1,0 +1,94 @@
+CREATE DATABASE IF NOT EXISTS marcafacil
+CHARACTER SET utf8mb4
+COLLATE utf8mb4_unicode_ci;
+
+USE marcafacil;
+
+CREATE TABLE empresas (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    nome VARCHAR(150) NOT NULL,
+    cnpj VARCHAR(18) NULL,
+    email VARCHAR(150) NULL,
+    telefone VARCHAR(20) NULL,
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE usuarios (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    empresa_id INT UNSIGNED NOT NULL,
+    nome VARCHAR(120) NOT NULL,
+    email VARCHAR(150) NOT NULL UNIQUE,
+    senha VARCHAR(255) NOT NULL,
+    tipo ENUM('admin', 'usuario') NOT NULL DEFAULT 'usuario',
+    ativo TINYINT(1) NOT NULL DEFAULT 1,
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_usuarios_empresa
+        FOREIGN KEY (empresa_id)
+        REFERENCES empresas(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE clientes (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    empresa_id INT UNSIGNED NOT NULL,
+    nome VARCHAR(150) NOT NULL,
+    cpf_cnpj VARCHAR(18) NULL,
+    email VARCHAR(150) NULL,
+    telefone VARCHAR(20) NULL,
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_clientes_empresa
+        FOREIGN KEY (empresa_id)
+        REFERENCES empresas(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE processos (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    empresa_id INT UNSIGNED NOT NULL,
+    cliente_id INT UNSIGNED NULL,
+    numero_processo VARCHAR(30) NULL,
+    marca VARCHAR(150) NOT NULL,
+    titular VARCHAR(150) NULL,
+    classe_ncl VARCHAR(50) NULL,
+    status VARCHAR(100) NOT NULL DEFAULT 'Ativo',
+    proximo_prazo DATE NULL,
+    observacoes TEXT NULL,
+    criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_processos_empresa
+        FOREIGN KEY (empresa_id)
+        REFERENCES empresas(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+
+    CONSTRAINT fk_processos_cliente
+        FOREIGN KEY (cliente_id)
+        REFERENCES clientes(id)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_processos_numero
+    ON processos(numero_processo);
+
+CREATE INDEX idx_processos_marca
+    ON processos(marca);
+
+CREATE INDEX idx_processos_titular
+    ON processos(titular);
+VALUES ('Empresa Teste', 'teste@empresa.com');
+
+INSERT INTO usuarios (empresa_id, nome, email, senha, tipo)
+VALUES (
+    1,
+    'Usuário Teste',
+    'teste@empresa.com',
+    '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+    'admin'
+);
+
