@@ -1,761 +1,1423 @@
 <?php
-$busca = trim($_GET['busca'] ?? '');
+session_start();
 
-$clientes = [
-    [
-        'nome' => 'Empresa Exemplo LTDA',
-        'email' => 'contato@empresaexemplo.com.br',
-        'telefone' => '(11) 99999-1111',
-        'cpf_cnpj' => '12.345.678/0001-90',
-        'processos' => 3,
-        'ativos' => 2,
-        'ultima_marca' => 'Marca Exemplo'
-    ],
-    [
-        'nome' => 'Nova Identidade ME',
-        'email' => 'contato@novaidentidade.com.br',
-        'telefone' => '(11) 98888-2222',
-        'cpf_cnpj' => '23.456.789/0001-10',
-        'processos' => 2,
-        'ativos' => 2,
-        'ultima_marca' => 'Nova Identidade'
-    ],
-    [
-        'nome' => 'Studio Alfa Serviços LTDA',
-        'email' => 'studio@alfa.com.br',
-        'telefone' => '(11) 97777-3333',
-        'cpf_cnpj' => '34.567.890/0001-20',
-        'processos' => 4,
-        'ativos' => 1,
-        'ultima_marca' => 'Studio Alfa'
-    ],
-    [
-        'nome' => 'Urban Prime Comércio LTDA',
-        'email' => 'contato@urbanprime.com.br',
-        'telefone' => '(11) 96666-4444',
-        'cpf_cnpj' => '45.678.901/0001-30',
-        'processos' => 1,
-        'ativos' => 1,
-        'ultima_marca' => 'Urban Prime'
-    ]
-];
-
-$filtrados = array_filter($clientes, function ($item) use ($busca) {
-    if ($busca === '') return true;
-
-    $texto = mb_strtolower(
-        $item['nome'] . ' ' .
-        $item['email'] . ' ' .
-        $item['telefone'] . ' ' .
-        $item['cpf_cnpj'] . ' ' .
-        $item['ultima_marca']
-    );
-
-    return str_contains($texto, mb_strtolower($busca));
-});
+$paginaAtual = 'clientes';
 
 function e($valor) {
     return htmlspecialchars((string)$valor, ENT_QUOTES, 'UTF-8');
 }
 
-function iniciais($nome) {
-    $partes = preg_split('/\s+/', trim($nome));
-    $resultado = '';
+function detectarTipo($despacho) {
+    $texto = mb_strtolower((string)$despacho);
 
-    foreach (array_slice($partes, 0, 2) as $parte) {
-        $resultado .= mb_strtoupper(mb_substr($parte, 0, 1));
+    if (str_contains($texto, 'prorroga')) return 'Prorrogação';
+    if (str_contains($texto, 'defer')) return 'Deferimento';
+    if (str_contains($texto, 'oposição') || str_contains($texto, 'oposicao')) return 'Oposição';
+    if (str_contains($texto, 'registro') || str_contains($texto, 'concessão') || str_contains($texto, 'concessao')) return 'Registro';
+    if (str_contains($texto, 'exigência') || str_contains($texto, 'exigencia')) return 'Exigência';
+    if (str_contains($texto, 'indefer')) return 'Indeferimento';
+
+    return 'Outros';
+}
+
+function dataParaTimestamp($data) {
+    $data = trim((string)$data);
+
+    if ($data === '') return 0;
+
+    $partes = explode('/', $data);
+
+    if (count($partes) === 3) {
+        [$dia, $mes, $ano] = $partes;
+        return mktime(0, 0, 0, (int)$mes, (int)$dia, (int)$ano);
     }
 
-    return $resultado;
+    $timestamp = strtotime($data);
+    return $timestamp ?: 0;
 }
+
+$arquivoClientes = __DIR__ . '/clientes.json';
+$arquivoDados = __DIR__ . '/dados_rpi.json';
+$arquivoVinculos = __DIR__ . '/vinculos_processos.json';
+
+if (!file_exists($arquivoClientes)) {
+    file_put_contents(
+        $arquivoClientes,
+        json_encode([], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+        LOCK_EX
+    );
+}
+
+$clientes = [];
+$publicacoes = [];
+$vinculos = [];
+
+$conteudo = file_get_contents($arquivoClientes);
+
+if ($conteudo !== false) {
+    $clientes = json_decode($conteudo, true);
+
+    if (!is_array($clientes)) {
+        $clientes = [];
+    }
+}
+
+if (file_exists($arquivoDados)) {
+    $conteudo = file_get_contents($arquivoDados);
+
+    if ($conteudo !== false) {
+        $publicacoes = json_decode($conteudo, true);
+
+        if (!is_array($publicacoes)) {
+            $publicacoes = [];
+        }
+    }
+}
+
+if (file_exists($arquivoVinculos)) {
+    $conteudo = file_get_contents($arquivoVinculos);
+
+    if ($conteudo !== false) {
+        $vinculos = json_decode($conteudo, true);
+
+        if (!is_array($vinculos)) {
+            $vinculos = [];
+        }
+    }
+}
+
+$erro = '';
+$sucesso = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    $acao = $_POST['acao'] ?? '';
+
+    if ($acao === 'salvar') {
+
+        $nome = trim($_POST['nome'] ?? '');
+        $cpfCnpj = trim($_POST['cpf_cnpj'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+        $telefone = trim($_POST['telefone'] ?? '');
+        $observacoes = trim($_POST['observacoes'] ?? '');
+
+        if ($nome === '') {
+            $erro = 'Informe o nome do cliente.';
+        } else {
+
+            $novoId = 1;
+
+            if ($clientes) {
+                $ids = array_map(
+                    fn($cliente) => (int)($cliente['id'] ?? 0),
+                    $clientes
+                );
+
+                $novoId = max($ids) + 1;
+            }
+
+            $clientes[] = [
+                'id' => $novoId,
+                'nome' => $nome,
+                'cpf_cnpj' => $cpfCnpj,
+                'email' => $email,
+                'telefone' => $telefone,
+                'observacoes' => $observacoes,
+                'criado_em' => date('Y-m-d H:i:s')
+            ];
+
+            $salvou = file_put_contents(
+                $arquivoClientes,
+                json_encode(
+                    $clientes,
+                    JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE
+                ),
+                LOCK_EX
+            );
+
+            if ($salvou === false) {
+                $erro = 'Não foi possível salvar o cliente.';
+            } else {
+                $sucesso = 'Cliente cadastrado com sucesso!';
+            }
+        }
+    }
+
+    if ($acao === 'excluir') {
+
+        $id = (int)($_POST['id'] ?? 0);
+
+        $temProcessos = false;
+
+        foreach ($vinculos as $processo => $clienteId) {
+            if ((int)$clienteId === $id) {
+                $temProcessos = true;
+                break;
+            }
+        }
+
+        if ($temProcessos) {
+            $erro = 'Este cliente possui processo(s) vinculado(s). Remova os vínculos antes de excluir.';
+        } else {
+
+            $clientes = array_values(
+                array_filter(
+                    $clientes,
+                    fn($cliente) => (int)($cliente['id'] ?? 0) !== $id
+                )
+            );
+
+            $salvou = file_put_contents(
+                $arquivoClientes,
+                json_encode(
+                    $clientes,
+                    JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE
+                ),
+                LOCK_EX
+            );
+
+            if ($salvou === false) {
+                $erro = 'Não foi possível excluir o cliente.';
+            } else {
+                $sucesso = 'Cliente excluído com sucesso!';
+            }
+        }
+    }
+}
+
+/*
+ * Monta o resumo atual de cada processo a partir das publicações da RPI.
+ */
+$processosAgrupados = [];
+
+foreach ($publicacoes as $item) {
+
+    $numero = trim((string)($item['processo'] ?? ''));
+
+    if ($numero === '') {
+        continue;
+    }
+
+    $timestamp = dataParaTimestamp($item['data'] ?? '');
+
+    if (!isset($processosAgrupados[$numero])) {
+
+        $processosAgrupados[$numero] = [
+            'processo' => $numero,
+            'marca' => $item['marca'] ?? 'Marca não informada',
+            'titular' => $item['titular'] ?? 'Titular não informado',
+            'rpi' => $item['rpi'] ?? '',
+            'data' => $item['data'] ?? '',
+            'pagina' => $item['pagina'] ?? '',
+            'despacho' => $item['despacho'] ?? '',
+            'tipo' => detectarTipo($item['despacho'] ?? ''),
+            'total_publicacoes' => 1,
+            '_timestamp' => $timestamp
+        ];
+
+    } else {
+
+        $processosAgrupados[$numero]['total_publicacoes']++;
+
+        if ($timestamp >= $processosAgrupados[$numero]['_timestamp']) {
+
+            $processosAgrupados[$numero]['marca'] =
+                $item['marca'] ?? $processosAgrupados[$numero]['marca'];
+
+            $processosAgrupados[$numero]['titular'] =
+                $item['titular'] ?? $processosAgrupados[$numero]['titular'];
+
+            $processosAgrupados[$numero]['rpi'] = $item['rpi'] ?? '';
+            $processosAgrupados[$numero]['data'] = $item['data'] ?? '';
+            $processosAgrupados[$numero]['pagina'] = $item['pagina'] ?? '';
+            $processosAgrupados[$numero]['despacho'] = $item['despacho'] ?? '';
+            $processosAgrupados[$numero]['tipo'] =
+                detectarTipo($item['despacho'] ?? '');
+
+            $processosAgrupados[$numero]['_timestamp'] = $timestamp;
+        }
+    }
+}
+
+/*
+ * Separa os processos por cliente usando vinculos_processos.json.
+ */
+$processosPorCliente = [];
+
+foreach ($vinculos as $numeroProcesso => $clienteId) {
+
+    $clienteId = (int)$clienteId;
+
+    if (
+        $clienteId > 0
+        &&
+        isset($processosAgrupados[$numeroProcesso])
+    ) {
+        $processosPorCliente[$clienteId][] =
+            $processosAgrupados[$numeroProcesso];
+    }
+}
+
+foreach ($processosPorCliente as &$lista) {
+    usort(
+        $lista,
+        fn($a, $b) => $b['_timestamp'] <=> $a['_timestamp']
+    );
+}
+unset($lista);
+
+$busca = trim($_GET['busca'] ?? '');
+
+$clientesFiltrados = array_filter(
+    $clientes,
+    function ($cliente) use ($busca) {
+
+        if ($busca === '') {
+            return true;
+        }
+
+        $texto = mb_strtolower(
+            ($cliente['nome'] ?? '')
+            . ' '
+            . ($cliente['cpf_cnpj'] ?? '')
+            . ' '
+            . ($cliente['email'] ?? '')
+            . ' '
+            . ($cliente['telefone'] ?? '')
+        );
+
+        return str_contains(
+            $texto,
+            mb_strtolower($busca)
+        );
+    }
+);
 ?>
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MarcaFácil | Clientes</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarcaFácil | Clientes</title>
 
-  <style>
-    :root {
-      --navy:#111827;
-      --blue:#2563eb;
-      --blue-dark:#1d4ed8;
-      --bg:#f6f8fc;
-      --text:#172033;
-      --muted:#6b7280;
-      --line:#e7eaf0;
-      --green:#147a55;
-    }
+<style>
+:root {
+    --navy:#111827;
+    --blue:#2563eb;
+    --blue-dark:#1d4ed8;
+    --bg:#f6f8fc;
+    --text:#172033;
+    --muted:#6b7280;
+    --line:#e7eaf0;
+    --green:#147a55;
+    --red:#c73b4b;
+}
 
-    * {
-      box-sizing:border-box;
-      margin:0;
-      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    }
+* {
+    box-sizing:border-box;
+    margin:0;
+    font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
 
-    body {
-      min-height:100vh;
-      background:var(--bg);
-      color:var(--text);
-    }
+body {
+    min-height:100vh;
+    background:var(--bg);
+    color:var(--text);
+}
 
+.layout {
+    display:grid;
+    grid-template-columns:250px 1fr;
+    min-height:100vh;
+}
+
+aside {
+    background:var(--navy);
+    color:#d7deeb;
+    padding:26px 16px;
+    display:flex;
+    flex-direction:column;
+}
+
+.brand {
+    padding:0 12px 30px;
+    color:#fff;
+    font-size:21px;
+    font-weight:800;
+    letter-spacing:-.7px;
+}
+
+.brand span {
+    color:#78a5ff;
+}
+
+.menu-title {
+    color:#8ea0bb;
+    text-transform:uppercase;
+    font-size:10px;
+    letter-spacing:.8px;
+    margin:8px 12px 10px;
+    font-weight:800;
+}
+
+nav {
+    display:grid;
+    gap:5px;
+}
+
+nav a {
+    text-decoration:none;
+    color:inherit;
+    padding:12px;
+    border-radius:9px;
+    font-size:14px;
+}
+
+nav a:hover,
+nav a.active {
+    background:#263757;
+    color:#fff;
+}
+
+.side-note {
+    margin-top:auto;
+    padding:14px;
+    border:1px solid #334155;
+    border-radius:10px;
+    font-size:12px;
+    line-height:1.5;
+}
+
+main {
+    width:100%;
+    max-width:1500px;
+    margin:auto;
+    padding:34px 42px;
+}
+
+.header {
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:20px;
+    margin-bottom:26px;
+}
+
+.header h1 {
+    font-size:28px;
+    letter-spacing:-.8px;
+}
+
+.header p {
+    color:var(--muted);
+    margin-top:6px;
+    font-size:14px;
+    line-height:1.5;
+}
+
+.badge {
+    background:#eaf1ff;
+    color:#2452aa;
+    padding:8px 10px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:800;
+}
+
+.actions-top {
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    margin-bottom:22px;
+}
+
+.primary {
+    border:0;
+    background:var(--blue);
+    color:#fff;
+    border-radius:9px;
+    padding:12px 17px;
+    font-weight:800;
+    cursor:pointer;
+    font-size:14px;
+    text-decoration:none;
+    display:inline-block;
+}
+
+.primary:hover {
+    background:var(--blue-dark);
+}
+
+.secondary {
+    border:1px solid #d9dfeb;
+    background:#fff;
+    color:#344054;
+    border-radius:8px;
+    padding:9px 11px;
+    font-size:12px;
+    font-weight:750;
+    cursor:pointer;
+    text-decoration:none;
+    display:inline-block;
+}
+
+.danger {
+    border:1px solid #f3c5cc;
+    background:#fff5f6;
+    color:#a6283a;
+    border-radius:8px;
+    padding:9px 11px;
+    font-size:12px;
+    font-weight:750;
+    cursor:pointer;
+}
+
+.panel {
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:16px;
+    box-shadow:0 2px 10px rgba(27,39,65,.03);
+    overflow:hidden;
+}
+
+.filters {
+    padding:20px;
+    border-bottom:1px solid var(--line);
+}
+
+.filters form {
+    display:grid;
+    grid-template-columns:1fr auto;
+    gap:10px;
+}
+
+input,
+textarea {
+    width:100%;
+    padding:11px 12px;
+    border:1px solid #d5dae5;
+    border-radius:9px;
+    font-size:14px;
+    background:#fff;
+    outline:none;
+}
+
+input:focus,
+textarea:focus {
+    border-color:#8fb1f7;
+    box-shadow:0 0 0 3px rgba(37,99,235,.08);
+}
+
+.panel-head {
+    padding:19px 21px 15px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:16px;
+}
+
+.panel-head h2 {
+    font-size:17px;
+}
+
+.panel-head span {
+    color:var(--muted);
+    font-size:13px;
+}
+
+.table-wrap {
+    overflow:auto;
+}
+
+table {
+    width:100%;
+    border-collapse:collapse;
+    min-width:900px;
+}
+
+th,
+td {
+    padding:14px 18px;
+    border-top:1px solid var(--line);
+    text-align:left;
+    font-size:13px;
+    vertical-align:middle;
+}
+
+th {
+    background:#fbfcfe;
+    color:var(--muted);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.4px;
+}
+
+td strong {
+    display:block;
+    margin-bottom:3px;
+}
+
+td small {
+    color:var(--muted);
+}
+
+.message {
+    margin-bottom:18px;
+    padding:13px 15px;
+    border-radius:10px;
+    font-size:13px;
+    font-weight:650;
+}
+
+.message.success {
+    color:#126149;
+    background:#dff7ed;
+}
+
+.message.error {
+    color:#a6283a;
+    background:#ffeaed;
+}
+
+.empty {
+    padding:40px 24px;
+    text-align:center;
+    color:var(--muted);
+    font-size:13px;
+}
+
+dialog {
+    border:0;
+    border-radius:16px;
+    padding:0;
+    width:min(860px,calc(100% - 30px));
+    box-shadow:0 22px 65px rgba(0,0,0,.28);
+}
+
+dialog::backdrop {
+    background:rgba(15,23,42,.48);
+}
+
+.modal {
+    padding:24px;
+}
+
+.modal h2 {
+    font-size:21px;
+    margin-bottom:5px;
+}
+
+.modal > p {
+    color:var(--muted);
+    font-size:13px;
+    margin-bottom:18px;
+}
+
+.form-grid {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+}
+
+label {
+    display:grid;
+    gap:6px;
+    font-size:12px;
+    font-weight:750;
+    color:#344054;
+}
+
+.full {
+    grid-column:1 / -1;
+}
+
+.modal-actions {
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+    margin-top:18px;
+}
+
+.detail-grid {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+}
+
+.detail-item {
+    border:1px solid #edf0f5;
+    background:#fafbfd;
+    border-radius:10px;
+    padding:12px;
+}
+
+.detail-item span {
+    display:block;
+    color:var(--muted);
+    font-size:11px;
+    margin-bottom:4px;
+}
+
+.detail-item strong {
+    font-size:13px;
+    line-height:1.45;
+}
+
+.detail-item.full {
+    grid-column:1 / -1;
+}
+
+.row-actions {
+    display:flex;
+    gap:7px;
+    flex-wrap:wrap;
+}
+
+.processos-title {
+    margin-top:22px;
+    padding-top:18px;
+    border-top:1px solid var(--line);
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    align-items:center;
+}
+
+.processos-title h3 {
+    font-size:16px;
+}
+
+.processos-title span {
+    color:var(--muted);
+    font-size:12px;
+}
+
+.process-list {
+    display:grid;
+    gap:10px;
+    margin-top:12px;
+    max-height:350px;
+    overflow:auto;
+}
+
+.process-card {
+    border:1px solid #e7eaf0;
+    border-radius:11px;
+    padding:13px;
+    display:grid;
+    grid-template-columns:1fr auto;
+    gap:12px;
+    background:#fbfcfe;
+}
+
+.process-card strong {
+    display:block;
+    font-size:13px;
+    margin-bottom:4px;
+}
+
+.process-card p {
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.45;
+    margin:0;
+}
+
+.process-card .meta {
+    margin-top:6px;
+    color:#4b5563;
+    font-size:11px;
+}
+
+.process-card .actions {
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    justify-content:center;
+}
+
+.no-process {
+    padding:20px;
+    text-align:center;
+    border:1px dashed #d9dfeb;
+    border-radius:10px;
+    color:var(--muted);
+    font-size:12px;
+}
+
+.process-count {
+    display:inline-block;
+    margin-top:4px;
+    color:#2452aa;
+    background:#eaf1ff;
+    border-radius:999px;
+    padding:4px 7px;
+    font-size:10px;
+    font-weight:800;
+}
+
+@media(max-width:850px) {
     .layout {
-      display:grid;
-      grid-template-columns:250px 1fr;
-      min-height:100vh;
+        grid-template-columns:1fr;
     }
 
     aside {
-      background:var(--navy);
-      color:#d7deeb;
-      padding:26px 16px;
-      display:flex;
-      flex-direction:column;
-    }
-
-    .brand {
-      padding:0 12px 30px;
-      color:#fff;
-      font-size:21px;
-      font-weight:800;
-      letter-spacing:-.7px;
-    }
-
-    .brand span {
-      color:#78a5ff;
-    }
-
-    .menu-title {
-      color:#8ea0bb;
-      text-transform:uppercase;
-      font-size:10px;
-      letter-spacing:.8px;
-      margin:8px 12px 10px;
-      font-weight:800;
+        padding:15px;
     }
 
     nav {
-      display:grid;
-      gap:5px;
+        display:flex;
+        overflow:auto;
     }
 
     nav a {
-      text-decoration:none;
-      color:inherit;
-      padding:12px;
-      border-radius:9px;
-      font-size:14px;
+        white-space:nowrap;
     }
 
-    nav a:hover,
-    nav a.active {
-      background:#263757;
-      color:#fff;
-    }
-
+    .menu-title,
     .side-note {
-      margin-top:auto;
-      padding:14px;
-      border:1px solid #334155;
-      border-radius:10px;
-      font-size:12px;
-      line-height:1.5;
+        display:none;
     }
 
     main {
-      width:100%;
-      max-width:1500px;
-      margin:auto;
-      padding:34px 42px;
+        padding:24px 16px;
     }
 
     .header {
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:20px;
-      margin-bottom:26px;
-    }
-
-    .header h1 {
-      font-size:28px;
-      letter-spacing:-.8px;
-    }
-
-    .header p {
-      color:var(--muted);
-      margin-top:6px;
-      font-size:14px;
-    }
-
-    .badge {
-      background:#eaf1ff;
-      color:#2452aa;
-      padding:8px 10px;
-      border-radius:999px;
-      font-size:12px;
-      font-weight:800;
-      white-space:nowrap;
-    }
-
-    .top-actions {
-      display:flex;
-      gap:10px;
-      align-items:center;
-    }
-
-    .primary {
-      border:0;
-      background:var(--blue);
-      color:#fff;
-      border-radius:9px;
-      padding:12px 17px;
-      font-weight:800;
-      cursor:pointer;
-      font-size:14px;
-    }
-
-    .primary:hover {
-      background:var(--blue-dark);
-    }
-
-    .metrics {
-      display:grid;
-      grid-template-columns:repeat(3,1fr);
-      gap:14px;
-      margin-bottom:22px;
-    }
-
-    .metric,
-    .search-card,
-    .panel {
-      background:#fff;
-      border:1px solid var(--line);
-      border-radius:16px;
-      box-shadow:0 2px 10px rgba(27,39,65,.03);
-    }
-
-    .metric {
-      padding:18px;
-    }
-
-    .metric p {
-      color:var(--muted);
-      font-size:12px;
-    }
-
-    .metric h2 {
-      margin-top:7px;
-      font-size:27px;
-    }
-
-    .search-card {
-      padding:18px;
-      margin-bottom:22px;
-    }
-
-    .search-form {
-      display:grid;
-      grid-template-columns:1fr auto;
-      gap:12px;
-      align-items:end;
-    }
-
-    label {
-      display:grid;
-      gap:6px;
-      font-size:12px;
-      font-weight:750;
-      color:#344054;
-    }
-
-    input {
-      width:100%;
-      padding:11px 12px;
-      border:1px solid #d5dae5;
-      border-radius:9px;
-      font-size:14px;
-      outline:none;
-    }
-
-    input:focus {
-      border-color:#8fb1f7;
-      box-shadow:0 0 0 3px rgba(37,99,235,.08);
-    }
-
-    .panel {
-      overflow:hidden;
-    }
-
-    .panel-head {
-      padding:19px 21px 15px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-    }
-
-    .panel-head h2 {
-      font-size:17px;
-    }
-
-    .panel-head span {
-      color:var(--muted);
-      font-size:13px;
-    }
-
-    table {
-      width:100%;
-      border-collapse:collapse;
-    }
-
-    th,
-    td {
-      text-align:left;
-      padding:14px 18px;
-      border-top:1px solid var(--line);
-      font-size:13px;
-      vertical-align:middle;
-    }
-
-    th {
-      font-size:11px;
-      color:var(--muted);
-      text-transform:uppercase;
-      letter-spacing:.4px;
-      background:#fbfcfe;
-    }
-
-    td strong {
-      display:block;
-      font-size:13px;
-      margin-bottom:3px;
-    }
-
-    td small {
-      color:var(--muted);
-      font-size:12px;
-    }
-
-    .client-cell {
-      display:flex;
-      align-items:center;
-      gap:10px;
-    }
-
-    .avatar {
-      width:36px;
-      height:36px;
-      min-width:36px;
-      border-radius:50%;
-      display:grid;
-      place-items:center;
-      background:#e8f0ff;
-      color:#2452aa;
-      font-size:12px;
-      font-weight:800;
-    }
-
-    .tag {
-      display:inline-block;
-      font-size:11px;
-      font-weight:800;
-      padding:5px 8px;
-      border-radius:999px;
-      color:#126149;
-      background:#dff7ed;
-    }
-
-    .secondary {
-      border:1px solid #d9dfeb;
-      background:#fff;
-      color:#344054;
-      border-radius:8px;
-      padding:8px 10px;
-      font-size:12px;
-      font-weight:750;
-      cursor:pointer;
-    }
-
-    .secondary:hover {
-      background:#f7f9fc;
-    }
-
-    .empty {
-      padding:36px 20px;
-      text-align:center;
-      color:var(--muted);
-      font-size:13px;
-    }
-
-    dialog {
-      border:0;
-      border-radius:16px;
-      padding:0;
-      box-shadow:0 22px 65px rgba(0,0,0,.28);
-      width:min(560px,calc(100% - 30px));
-    }
-
-    dialog::backdrop {
-      background:rgba(15,23,42,.48);
-    }
-
-    .modal {
-      padding:25px;
-    }
-
-    .modal h2 {
-      font-size:21px;
-    }
-
-    .modal > p {
-      color:var(--muted);
-      font-size:13px;
-      margin:5px 0 18px;
-    }
-
-    .detail-grid {
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:10px;
-    }
-
-    .detail-item {
-      border:1px solid #edf0f5;
-      background:#fafbfd;
-      border-radius:10px;
-      padding:12px;
-    }
-
-    .detail-item span {
-      display:block;
-      color:var(--muted);
-      font-size:11px;
-      margin-bottom:4px;
-    }
-
-    .detail-item strong {
-      font-size:13px;
-    }
-
-    .detail-item.full {
-      grid-column:1 / -1;
-    }
-
-    .modal-actions {
-      display:flex;
-      justify-content:flex-end;
-      margin-top:18px;
-    }
-
-    @media(max-width:900px) {
-      .layout {
-        grid-template-columns:1fr;
-      }
-
-      aside {
-        padding:15px;
-      }
-
-      nav {
-        display:flex;
-        overflow:auto;
-      }
-
-      nav a {
-        white-space:nowrap;
-      }
-
-      .menu-title,
-      .side-note {
-        display:none;
-      }
-
-      main {
-        padding:24px 16px;
-      }
-
-      .header {
         flex-direction:column;
-      }
-
-      .metrics {
-        grid-template-columns:1fr 1fr;
-      }
-
-      .panel {
-        overflow:auto;
-      }
-
-      table {
-        min-width:850px;
-      }
     }
+}
 
-    @media(max-width:560px) {
-      .metrics,
-      .search-form,
-      .detail-grid {
+@media(max-width:600px) {
+    .filters form,
+    .form-grid,
+    .detail-grid {
         grid-template-columns:1fr;
-      }
-
-      .detail-item.full {
-        grid-column:auto;
-      }
     }
-  </style>
+
+    .full,
+    .detail-item.full {
+        grid-column:auto;
+    }
+
+    .process-card {
+        grid-template-columns:1fr;
+    }
+
+    .process-card .actions {
+        flex-direction:row;
+    }
+}
+</style>
 </head>
 
 <body>
 
 <div class="layout">
-  <aside>
-    <div class="brand">Marca<span>Fácil</span></div>
 
-    <div class="menu-title">Gestão</div>
+<?php require __DIR__ . '/menu.php'; ?>
 
-    <nav>
-      <a href="index.php">▦ &nbsp; Visão geral</a>
-      <a href="#" class="active">♙ &nbsp; Clientes</a>
-      <a href="processos.php">◫ &nbsp; Processos</a>
-      <a href="consulta_rpi.php">⌕ &nbsp; Consulta RPI</a>
-      <a href="publicacoes.php">▤ &nbsp; Publicações</a>
-    </nav>
+<main>
 
-    <div class="side-note">
-      <strong style="color:#fff; display:block; margin-bottom:4px;">Clientes</strong>
-      Organize os titulares e empresas vinculadas aos processos.
-    </div>
-  </aside>
-
-  <main>
-    <div class="header">
-      <div>
+<div class="header">
+    <div>
         <h1>Clientes</h1>
-        <p>Consulte os clientes do escritório e veja rapidamente os processos associados.</p>
-      </div>
-
-      <div class="top-actions">
-        <span class="badge">Protótipo sem banco</span>
-        <button class="primary" id="novoCliente">+ Novo cliente</button>
-      </div>
+        <p>Cadastre clientes e consulte os processos vinculados a cada um.</p>
     </div>
 
-    <section class="metrics">
-      <div class="metric">
-        <p>Total de clientes</p>
-        <h2><?= count($clientes) ?></h2>
-      </div>
-
-      <div class="metric">
-        <p>Processos vinculados</p>
-        <h2><?= array_sum(array_column($clientes, 'processos')) ?></h2>
-      </div>
-
-      <div class="metric">
-        <p>Processos ativos</p>
-        <h2><?= array_sum(array_column($clientes, 'ativos')) ?></h2>
-      </div>
-    </section>
-
-    <section class="search-card">
-      <form method="GET" class="search-form">
-        <label>
-          Buscar cliente
-          <input
-            type="text"
-            name="busca"
-            value="<?= e($busca) ?>"
-            placeholder="Nome, e-mail, CNPJ, telefone ou marca"
-          >
-        </label>
-
-        <button class="primary" type="submit">Pesquisar</button>
-      </form>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Clientes cadastrados</h2>
-        <span><?= count($filtrados) ?> resultado(s)</span>
-      </div>
-
-      <?php if (!$filtrados): ?>
-        <div class="empty">
-          Nenhum cliente encontrado.
-        </div>
-      <?php else: ?>
-        <table>
-          <thead>
-            <tr>
-              <th>Cliente</th>
-              <th>Contato</th>
-              <th>CPF / CNPJ</th>
-              <th>Processos</th>
-              <th>Última marca</th>
-              <th>Ações</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            <?php foreach ($filtrados as $item): ?>
-              <tr>
-                <td>
-                  <div class="client-cell">
-                    <span class="avatar"><?= e(iniciais($item['nome'])) ?></span>
-                    <div>
-                      <strong><?= e($item['nome']) ?></strong>
-                      <small><?= e($item['email']) ?></small>
-                    </div>
-                  </div>
-                </td>
-
-                <td>
-                  <strong><?= e($item['telefone']) ?></strong>
-                  <small><?= e($item['email']) ?></small>
-                </td>
-
-                <td><?= e($item['cpf_cnpj']) ?></td>
-
-                <td>
-                  <span class="tag"><?= e($item['ativos']) ?> ativo(s)</span>
-                  <small style="display:block; margin-top:4px;">
-                    <?= e($item['processos']) ?> no total
-                  </small>
-                </td>
-
-                <td><?= e($item['ultima_marca']) ?></td>
-
-                <td>
-                  <button
-                    type="button"
-                    class="secondary detalhes"
-                    data-cliente='<?= e(json_encode($item, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?>'
-                  >
-                    Detalhes
-                  </button>
-                </td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
-      <?php endif; ?>
-    </section>
-  </main>
+    <span class="badge"><?= count($clientes) ?> cliente(s)</span>
 </div>
 
-<dialog id="detailModal">
-  <div class="modal">
-    <h2 id="modalNome">Detalhes do cliente</h2>
-    <p>Informações principais do cliente e seus processos.</p>
+<?php if ($sucesso): ?>
+<div class="message success">
+    <?= e($sucesso) ?>
+</div>
+<?php endif; ?>
 
-    <div class="detail-grid">
-      <div class="detail-item">
-        <span>E-mail</span>
-        <strong id="modalEmail">—</strong>
-      </div>
+<?php if ($erro): ?>
+<div class="message error">
+    <?= e($erro) ?>
+</div>
+<?php endif; ?>
 
-      <div class="detail-item">
-        <span>Telefone</span>
-        <strong id="modalTelefone">—</strong>
-      </div>
+<div class="actions-top">
+    <button
+        type="button"
+        class="primary"
+        id="abrirNovoCliente"
+    >
+        + Novo cliente
+    </button>
+</div>
 
-      <div class="detail-item">
-        <span>CPF / CNPJ</span>
-        <strong id="modalDocumento">—</strong>
-      </div>
+<section class="panel">
 
-      <div class="detail-item">
-        <span>Processos</span>
-        <strong id="modalProcessos">—</strong>
-      </div>
+    <div class="filters">
 
-      <div class="detail-item">
-        <span>Processos ativos</span>
-        <strong id="modalAtivos">—</strong>
-      </div>
+        <form method="GET">
 
-      <div class="detail-item">
-        <span>Última marca</span>
-        <strong id="modalMarca">—</strong>
-      </div>
+            <input
+                type="text"
+                name="busca"
+                value="<?= e($busca) ?>"
+                placeholder="Buscar por nome, CPF/CNPJ, e-mail ou telefone"
+            >
+
+            <button
+                type="submit"
+                class="primary"
+            >
+                Buscar
+            </button>
+
+        </form>
+
     </div>
 
-    <div class="modal-actions">
-      <button type="button" class="primary" id="fecharModal">Fechar</button>
+    <div class="panel-head">
+
+        <h2>Clientes cadastrados</h2>
+
+        <span>
+            <?= count($clientesFiltrados) ?> resultado(s)
+        </span>
+
     </div>
-  </div>
+
+    <?php if (!$clientesFiltrados): ?>
+
+        <div class="empty">
+            Nenhum cliente encontrado.
+        </div>
+
+    <?php else: ?>
+
+        <div class="table-wrap">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Cliente</th>
+                        <th>CPF / CNPJ</th>
+                        <th>Contato</th>
+                        <th>Processos</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                <?php foreach ($clientesFiltrados as $cliente): ?>
+
+                    <?php
+                    $clienteId = (int)($cliente['id'] ?? 0);
+                    $processosCliente = $processosPorCliente[$clienteId] ?? [];
+                    ?>
+
+                    <tr>
+
+                        <td>
+                            <strong>
+                                <?= e($cliente['nome'] ?? '') ?>
+                            </strong>
+
+                            <small>
+                                ID #<?= $clienteId ?>
+                            </small>
+                        </td>
+
+                        <td>
+                            <?= e(
+                                ($cliente['cpf_cnpj'] ?? '') !== ''
+                                ? $cliente['cpf_cnpj']
+                                : 'Não informado'
+                            ) ?>
+                        </td>
+
+                        <td>
+                            <strong>
+                                <?= e(
+                                    ($cliente['email'] ?? '') !== ''
+                                    ? $cliente['email']
+                                    : 'Sem e-mail'
+                                ) ?>
+                            </strong>
+
+                            <small>
+                                <?= e(
+                                    ($cliente['telefone'] ?? '') !== ''
+                                    ? $cliente['telefone']
+                                    : 'Sem telefone'
+                                ) ?>
+                            </small>
+                        </td>
+
+                        <td>
+                            <strong>
+                                <?= count($processosCliente) ?>
+                            </strong>
+
+                            <small>
+                                processo(s) vinculado(s)
+                            </small>
+                        </td>
+
+                        <td>
+
+                            <div class="row-actions">
+
+                                <button
+                                    type="button"
+                                    class="secondary detalhes"
+                                    data-cliente='<?= e(
+                                        json_encode(
+                                            [
+                                                'cliente' => $cliente,
+                                                'processos' => $processosCliente
+                                            ],
+                                            JSON_UNESCAPED_UNICODE |
+                                            JSON_UNESCAPED_SLASHES
+                                        )
+                                    ) ?>'
+                                >
+                                    Detalhes
+                                </button>
+
+                                <form
+                                    method="POST"
+                                    onsubmit="return confirm('Tem certeza que deseja excluir este cliente?');"
+                                    style="display:inline;"
+                                >
+
+                                    <input
+                                        type="hidden"
+                                        name="acao"
+                                        value="excluir"
+                                    >
+
+                                    <input
+                                        type="hidden"
+                                        name="id"
+                                        value="<?= $clienteId ?>"
+                                    >
+
+                                    <button
+                                        type="submit"
+                                        class="danger"
+                                    >
+                                        Excluir
+                                    </button>
+
+                                </form>
+
+                            </div>
+
+                        </td>
+
+                    </tr>
+
+                <?php endforeach; ?>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    <?php endif; ?>
+
+</section>
+
+</main>
+
+</div>
+
+<dialog id="novoClienteModal">
+
+<div class="modal">
+
+    <h2>Novo cliente</h2>
+
+    <p>Preencha os dados principais do cliente.</p>
+
+    <form method="POST">
+
+        <input type="hidden" name="acao" value="salvar">
+
+        <div class="form-grid">
+
+            <label class="full">
+                Nome / Razão social
+
+                <input
+                    type="text"
+                    name="nome"
+                    required
+                >
+            </label>
+
+            <label>
+                CPF / CNPJ
+
+                <input
+                    type="text"
+                    name="cpf_cnpj"
+                    placeholder="Opcional"
+                >
+            </label>
+
+            <label>
+                Telefone
+
+                <input
+                    type="text"
+                    name="telefone"
+                    placeholder="Opcional"
+                >
+            </label>
+
+            <label class="full">
+                E-mail
+
+                <input
+                    type="email"
+                    name="email"
+                    placeholder="Opcional"
+                >
+            </label>
+
+            <label class="full">
+                Observações
+
+                <textarea
+                    name="observacoes"
+                    rows="4"
+                    placeholder="Informações adicionais do cliente"
+                ></textarea>
+            </label>
+
+        </div>
+
+        <div class="modal-actions">
+
+            <button
+                type="button"
+                class="secondary"
+                id="cancelarNovoCliente"
+            >
+                Cancelar
+            </button>
+
+            <button
+                type="submit"
+                class="primary"
+            >
+                Salvar cliente
+            </button>
+
+        </div>
+
+    </form>
+
+</div>
+
 </dialog>
 
-<dialog id="newClientModal">
-  <div class="modal">
-    <h2>Novo cliente</h2>
-    <p>Este formulário é apenas demonstrativo nesta etapa.</p>
+<dialog id="detalhesModal">
+
+<div class="modal">
+
+    <h2 id="detalheNome">
+        Detalhes do cliente
+    </h2>
+
+    <p id="detalheSubtitulo">
+        Informações cadastradas.
+    </p>
 
     <div class="detail-grid">
-      <label>
-        Nome / Razão social
-        <input type="text" placeholder="Ex.: Empresa Exemplo LTDA">
-      </label>
 
-      <label>
-        CPF / CNPJ
-        <input type="text" placeholder="00.000.000/0001-00">
-      </label>
+        <div class="detail-item">
+            <span>ID</span>
+            <strong id="detalheId">—</strong>
+        </div>
 
-      <label>
-        E-mail
-        <input type="email" placeholder="contato@empresa.com">
-      </label>
+        <div class="detail-item">
+            <span>CPF / CNPJ</span>
+            <strong id="detalheDocumento">—</strong>
+        </div>
 
-      <label>
-        Telefone
-        <input type="text" placeholder="(11) 99999-9999">
-      </label>
+        <div class="detail-item">
+            <span>E-mail</span>
+            <strong id="detalheEmail">—</strong>
+        </div>
+
+        <div class="detail-item">
+            <span>Telefone</span>
+            <strong id="detalheTelefone">—</strong>
+        </div>
+
+        <div class="detail-item full">
+            <span>Observações</span>
+            <strong id="detalheObservacoes">—</strong>
+        </div>
+
     </div>
 
-    <div class="modal-actions" style="gap:8px;">
-      <button type="button" class="secondary" id="cancelarCliente">Cancelar</button>
-      <button type="button" class="primary" id="salvarDemo">Salvar cliente</button>
+    <div class="processos-title">
+        <h3>Processos vinculados</h3>
+        <span id="detalheTotalProcessos">0 processo(s)</span>
     </div>
-  </div>
+
+    <div
+        class="process-list"
+        id="listaProcessos"
+    ></div>
+
+    <div class="modal-actions">
+
+        <button
+            type="button"
+            class="primary"
+            id="fecharDetalhes"
+        >
+            Fechar
+        </button>
+
+    </div>
+
+</div>
+
 </dialog>
 
 <script>
-const detailModal = document.querySelector('#detailModal');
-const newClientModal = document.querySelector('#newClientModal');
+const novoClienteModal =
+    document.querySelector('#novoClienteModal');
 
-document.querySelectorAll('.detalhes').forEach(button => {
-  button.addEventListener('click', () => {
-    const cliente = JSON.parse(button.dataset.cliente);
+const detalhesModal =
+    document.querySelector('#detalhesModal');
 
-    document.querySelector('#modalNome').textContent = cliente.nome;
-    document.querySelector('#modalEmail').textContent = cliente.email;
-    document.querySelector('#modalTelefone').textContent = cliente.telefone;
-    document.querySelector('#modalDocumento').textContent = cliente.cpf_cnpj;
-    document.querySelector('#modalProcessos').textContent = cliente.processos;
-    document.querySelector('#modalAtivos').textContent = cliente.ativos;
-    document.querySelector('#modalMarca').textContent = cliente.ultima_marca;
+document
+.querySelector('#abrirNovoCliente')
+.addEventListener(
+    'click',
+    () => novoClienteModal.showModal()
+);
 
-    detailModal.showModal();
-  });
+document
+.querySelector('#cancelarNovoCliente')
+.addEventListener(
+    'click',
+    () => novoClienteModal.close()
+);
+
+document
+.querySelectorAll('.detalhes')
+.forEach(button => {
+
+    button.addEventListener(
+        'click',
+        () => {
+
+            const dados =
+                JSON.parse(
+                    button.dataset.cliente
+                );
+
+            const cliente = dados.cliente;
+            const processos = dados.processos || [];
+
+            document
+            .querySelector('#detalheNome')
+            .textContent =
+                cliente.nome
+                || 'Detalhes do cliente';
+
+            document
+            .querySelector('#detalheSubtitulo')
+            .textContent =
+                processos.length
+                + ' processo(s) vinculado(s)';
+
+            document
+            .querySelector('#detalheId')
+            .textContent =
+                cliente.id
+                || '—';
+
+            document
+            .querySelector('#detalheDocumento')
+            .textContent =
+                cliente.cpf_cnpj
+                || 'Não informado';
+
+            document
+            .querySelector('#detalheEmail')
+            .textContent =
+                cliente.email
+                || 'Não informado';
+
+            document
+            .querySelector('#detalheTelefone')
+            .textContent =
+                cliente.telefone
+                || 'Não informado';
+
+            document
+            .querySelector('#detalheObservacoes')
+            .textContent =
+                cliente.observacoes
+                || 'Nenhuma observação';
+
+            document
+            .querySelector('#detalheTotalProcessos')
+            .textContent =
+                processos.length
+                + ' processo(s)';
+
+            const lista =
+                document.querySelector(
+                    '#listaProcessos'
+                );
+
+            lista.innerHTML = '';
+
+            if (processos.length === 0) {
+
+                lista.innerHTML =
+                    '<div class="no-process">'
+                    + 'Nenhum processo vinculado a este cliente.'
+                    + '</div>';
+
+            } else {
+
+                processos.forEach(
+                    processo => {
+
+                        const card =
+                            document.createElement(
+                                'div'
+                            );
+
+                        card.className =
+                            'process-card';
+
+                        const info =
+                            document.createElement(
+                                'div'
+                            );
+
+                        const titulo =
+                            document.createElement(
+                                'strong'
+                            );
+
+                        titulo.textContent =
+                            processo.marca
+                            || 'Marca não informada';
+
+                        const linha =
+                            document.createElement(
+                                'p'
+                            );
+
+                        linha.textContent =
+                            'Processo '
+                            + (processo.processo || '—')
+                            + ' · RPI '
+                            + (processo.rpi || '—')
+                            + ' · '
+                            + (processo.data || 'Sem data');
+
+                        const despacho =
+                            document.createElement(
+                                'p'
+                            );
+
+                        despacho.className =
+                            'meta';
+
+                        despacho.textContent =
+                            processo.despacho
+                            || 'Sem despacho informado';
+
+                        info.appendChild(titulo);
+                        info.appendChild(linha);
+                        info.appendChild(despacho);
+
+                        const actions =
+                            document.createElement(
+                                'div'
+                            );
+
+                        actions.className =
+                            'actions';
+
+                        const historico =
+                            document.createElement(
+                                'a'
+                            );
+
+                        historico.className =
+                            'secondary';
+
+                        historico.textContent =
+                            'Ver histórico';
+
+                        historico.href =
+                            'consulta_rpi.php?termo='
+                            + encodeURIComponent(
+                                processo.processo
+                                || ''
+                            )
+                            + '&filtro=processo';
+
+                        const publicacoes =
+                            document.createElement(
+                                'a'
+                            );
+
+                        publicacoes.className =
+                            'primary';
+
+                        publicacoes.textContent =
+                            'Publicações';
+
+                        publicacoes.href =
+                            'publicacoes.php?busca='
+                            + encodeURIComponent(
+                                processo.processo
+                                || ''
+                            );
+
+                        actions.appendChild(
+                            historico
+                        );
+
+                        actions.appendChild(
+                            publicacoes
+                        );
+
+                        card.appendChild(info);
+                        card.appendChild(actions);
+
+                        lista.appendChild(card);
+                    }
+                );
+            }
+
+            detalhesModal.showModal();
+        }
+    );
 });
 
-document.querySelector('#fecharModal').addEventListener('click', () => {
-  detailModal.close();
-});
-
-document.querySelector('#novoCliente').addEventListener('click', () => {
-  newClientModal.showModal();
-});
-
-document.querySelector('#cancelarCliente').addEventListener('click', () => {
-  newClientModal.close();
-});
-
-document.querySelector('#salvarDemo').addEventListener('click', () => {
-  alert('Quando conectarmos o banco, este formulário salvará o cliente de verdade.');
-});
+document
+.querySelector('#fecharDetalhes')
+.addEventListener(
+    'click',
+    () => detalhesModal.close()
+);
 </script>
 
 </body>

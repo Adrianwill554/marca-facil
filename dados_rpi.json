@@ -1,0 +1,22 @@
+[
+    {
+        "processo": "930123456",
+        "marca": "Marca Exemplo",
+        "titular": "Empresa Exemplo LTDA",
+        "rpi": "2845",
+        "data": "20\/08\/2026",
+        "despacho": "Deferimento do pedido de registro",
+        "pagina": "154",
+        "importado_em": "2026-08-31 17:05:49"
+    },
+    {
+        "processo": "921987654",
+        "marca": "Nova Identidade",
+        "titular": "Comércio Nova Identidade ME",
+        "rpi": "2844",
+        "data": "13\/08\/2026",
+        "despacho": "Publicação de pedido para oposição",
+        "pagina": "89",
+        "importado_em": "2026-08-31 17:05:49"
+    }
+]
