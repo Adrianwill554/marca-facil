@@ -100,6 +100,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim($_POST['email'] ?? '');
         $telefone = trim($_POST['telefone'] ?? '');
         $observacoes = trim($_POST['observacoes'] ?? '');
+        $camposExtras = [];
+
+        foreach ([
+            'tipo_pessoa', 'natureza_juridica', 'status', 'apelido',
+            'responsavel', 'responsavel_externo', 'inscricao_municipal',
+            'inscricao_estadual', 'objeto_social', 'logradouro', 'numero',
+            'complemento', 'bairro', 'cidade', 'uf', 'pais', 'cep',
+            'contato_nome', 'pasta', 'servicos'
+        ] as $campo) {
+            $camposExtras[$campo] = trim((string) ($_POST[$campo] ?? ''));
+        }
 
         if ($nome === '') {
             $erro = 'Informe o nome do cliente.';
@@ -123,6 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'email' => $email,
                 'telefone' => $telefone,
                 'observacoes' => $observacoes,
+                ...$camposExtras,
                 'criado_em' => date('Y-m-d H:i:s')
             ];
 
@@ -284,6 +296,10 @@ $clientesFiltrados = array_filter(
             . ($cliente['email'] ?? '')
             . ' '
             . ($cliente['telefone'] ?? '')
+            . ' ' . ($cliente['apelido'] ?? '')
+            . ' ' . ($cliente['responsavel'] ?? '')
+            . ' ' . ($cliente['cidade'] ?? '')
+            . ' ' . ($cliente['pasta'] ?? '')
         );
 
         return str_contains(

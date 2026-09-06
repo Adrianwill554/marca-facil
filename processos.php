@@ -49,10 +49,12 @@ function dataParaTimestamp($data) {
 $arquivoDados = __DIR__ . '/dados_rpi.json';
 $arquivoClientes = __DIR__ . '/clientes.json';
 $arquivoVinculos = __DIR__ . '/vinculos_processos.json';
+$arquivoMonitorados = __DIR__ . '/processos_monitorados.json';
 
 $publicacoes = [];
 $clientes = [];
 $vinculos = [];
+$monitorados = [];
 $mensagem = '';
 
 if (file_exists($arquivoDados)) {
@@ -79,6 +81,19 @@ if (file_exists($arquivoVinculos)) {
     if ($conteudo !== false) {
         $vinculos = json_decode($conteudo, true);
         if (!is_array($vinculos)) $vinculos = [];
+    }
+}
+
+if (file_exists($arquivoMonitorados)) {
+    $conteudo = file_get_contents($arquivoMonitorados);
+    if ($conteudo !== false) {
+        $itensMonitorados = json_decode($conteudo, true);
+        if (is_array($itensMonitorados)) {
+            foreach ($itensMonitorados as $itemMonitorado) {
+                $numeroMonitorado = trim((string) ($itemMonitorado['processo'] ?? ''));
+                if ($numeroMonitorado !== '') $monitorados[$numeroMonitorado] = $itemMonitorado;
+            }
+        }
     }
 }
 
@@ -133,6 +148,7 @@ foreach ($publicacoes as $item) {
             'processo' => $numero,
             'marca' => $item['marca'] ?? 'Marca não informada',
             'titular' => $item['titular'] ?? 'Titular não informado',
+            'procurador' => $item['procurador'] ?? '',
             'ultima_rpi' => $item['rpi'] ?? '',
             'ultima_data' => $item['data'] ?? '',
             'ultimo_despacho' => $item['despacho'] ?? '',
@@ -147,6 +163,7 @@ foreach ($publicacoes as $item) {
         if ($item['_timestamp'] >= $processosAgrupados[$numero]['_timestamp']) {
             $processosAgrupados[$numero]['marca'] = $item['marca'] ?? $processosAgrupados[$numero]['marca'];
             $processosAgrupados[$numero]['titular'] = $item['titular'] ?? $processosAgrupados[$numero]['titular'];
+            $processosAgrupados[$numero]['procurador'] = $item['procurador'] ?? $processosAgrupados[$numero]['procurador'];
             $processosAgrupados[$numero]['ultima_rpi'] = $item['rpi'] ?? '';
             $processosAgrupados[$numero]['ultima_data'] = $item['data'] ?? '';
             $processosAgrupados[$numero]['ultimo_despacho'] = $item['despacho'] ?? '';
@@ -158,6 +175,11 @@ foreach ($publicacoes as $item) {
 }
 
 $processos = array_values($processosAgrupados);
+
+$processos = array_values(array_filter(
+    $processos,
+    fn(array $processo): bool => isset($monitorados[$processo['processo']])
+));
 
 foreach ($processos as &$processo) {
     $numero = $processo['processo'];
@@ -176,6 +198,7 @@ $filtrados = array_filter($processos, function ($item) use ($busca, $tipo) {
         ($item['processo'] ?? '') . ' ' .
         ($item['marca'] ?? '') . ' ' .
         ($item['titular'] ?? '') . ' ' .
+        ($item['procurador'] ?? '') . ' ' .
         ($item['cliente_nome'] ?? '') . ' ' .
         ($item['ultimo_despacho'] ?? '')
     );
@@ -590,7 +613,7 @@ td small {
             type="text"
             name="busca"
             value="<?= e($busca) ?>"
-            placeholder="Processo, marca, titular ou cliente"
+            placeholder="Processo, marca, titular, procurador ou cliente"
         >
     </label>
 
@@ -654,6 +677,9 @@ td small {
 <td>
     <strong><?= e($item['marca']) ?></strong>
     <small><?= e($item['titular']) ?></small>
+    <?php if (!empty($item['procurador'])): ?>
+    <small style="display:block;margin-top:4px;">Procurador: <?= e($item['procurador']) ?></small>
+    <?php endif; ?>
 </td>
 
 <td>
@@ -722,6 +748,24 @@ td small {
 <td>
 
 <div class="actions">
+
+    <a
+        class="secondary"
+        href="gerar_extrato_rpi.php?processo=<?= urlencode($item['processo']) ?>"
+    >
+        Baixar PDF
+    </a>
+
+    <?php if (!empty($item['ultima_rpi'])): ?>
+    <a
+        class="secondary"
+        target="_blank"
+        rel="noopener"
+        href="https://revistas.inpi.gov.br/pdf/Marcas<?= urlencode((string)$item['ultima_rpi']) ?>.pdf"
+    >
+        RPI oficial
+    </a>
+    <?php endif; ?>
 
     <a
         class="secondary"

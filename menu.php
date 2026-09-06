@@ -58,8 +58,14 @@ $menuItens = [
         'href' => 'importar_rpi.php',
         'icone' => '⇧',
         'texto' => 'Importar RPI'
-    ]
+    ],
 
+    [
+        'id' => 'rpi',
+        'href' => 'rpi.php',
+        'icone' => 'R',
+        'texto' => 'Revista RPI'
+    ]
 ];
 
 ?>
