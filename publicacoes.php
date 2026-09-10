@@ -1,4 +1,5 @@
 <?php
+$paginaAtual = 'publicacoes';
 $tipo = $_GET['tipo'] ?? 'todas';
 $busca = trim($_GET['busca'] ?? '');
 $rpi = trim($_GET['rpi'] ?? '');
@@ -46,6 +47,58 @@ $publicacoes = [
     ]
 ];
 
+$arquivoDados = __DIR__ . '/dados_rpi.json';
+$arquivoEdicoes = __DIR__ . '/rpis.json';
+$edicoesRpi = [];
+
+if (is_file($arquivoDados)) {
+    $conteudo = file_get_contents($arquivoDados);
+    $dadosReais = $conteudo !== false ? json_decode($conteudo, true) : null;
+
+    if (is_array($dadosReais)) {
+        $publicacoes = $dadosReais;
+    }
+}
+
+if (is_file($arquivoEdicoes)) {
+    $conteudo = file_get_contents($arquivoEdicoes);
+    $edicoes = $conteudo !== false ? json_decode($conteudo, true) : null;
+
+    if (is_array($edicoes)) {
+        foreach ($edicoes as $edicao) {
+            $numero = trim((string)($edicao['numero'] ?? ''));
+            $arquivo = trim((string)($edicao['arquivo'] ?? ''));
+            $urlOrigem = trim((string)($edicao['url_origem'] ?? ''));
+
+            if ($numero !== '') {
+                $edicoesRpi[$numero] = [
+                    'local' => $arquivo !== '' && is_file(__DIR__ . '/rpis/' . $arquivo)
+                        ? 'rpis/' . rawurlencode($arquivo)
+                        : '',
+                    'oficial' => filter_var($urlOrigem, FILTER_VALIDATE_URL) ? $urlOrigem : '',
+                    'tamanho' => (int)($edicao['tamanho'] ?? 0),
+                ];
+            }
+        }
+    }
+}
+
+foreach ($publicacoes as &$publicacao) {
+    $despacho = mb_strtolower((string)($publicacao['despacho'] ?? ''));
+
+    if (!isset($publicacao['tipo']) || trim((string)$publicacao['tipo']) === '') {
+        $publicacao['tipo'] = match (true) {
+            str_contains($despacho, 'indefer') => 'Indeferimento',
+            str_contains($despacho, 'defer') => 'Deferimento',
+            str_contains($despacho, 'oposi') => 'Oposição',
+            str_contains($despacho, 'prorroga') => 'Prorrogação',
+            str_contains($despacho, 'registro') || str_contains($despacho, 'concess') => 'Registro',
+            default => 'Outros',
+        };
+    }
+}
+unset($publicacao);
+
 $filtradas = array_filter($publicacoes, function ($item) use ($tipo, $busca, $rpi) {
     $okTipo = $tipo === 'todas' || mb_strtolower($item['tipo']) === mb_strtolower($tipo);
 
@@ -61,6 +114,19 @@ $filtradas = array_filter($publicacoes, function ($item) use ($tipo, $busca, $rp
 
     return $okTipo && $okBusca && $okRpi;
 });
+
+$filtradas = array_values($filtradas);
+usort($filtradas, function ($a, $b) {
+    $dataA = strtotime(str_replace('/', '-', (string)($a['data'] ?? ''))) ?: 0;
+    $dataB = strtotime(str_replace('/', '-', (string)($b['data'] ?? ''))) ?: 0;
+    return $dataB <=> $dataA;
+});
+
+$porPagina = 50;
+$totalFiltradas = count($filtradas);
+$totalPaginas = max(1, (int)ceil($totalFiltradas / $porPagina));
+$pagina = max(1, min((int)($_GET['pagina'] ?? 1), $totalPaginas));
+$filtradas = array_slice($filtradas, ($pagina - 1) * $porPagina, $porPagina);
 
 function e($valor) {
     return htmlspecialchars((string)$valor, ENT_QUOTES, 'UTF-8');
@@ -360,6 +426,40 @@ function e($valor) {
       flex-wrap:wrap;
     }
 
+    .actions a {
+      display:inline-flex;
+      align-items:center;
+      text-decoration:none;
+    }
+
+    .pagination {
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:10px;
+      padding:18px;
+      border-top:1px solid var(--line);
+    }
+
+    .pagination a,
+    .pagination span {
+      padding:9px 12px;
+      border-radius:8px;
+      font-size:13px;
+      text-decoration:none;
+    }
+
+    .pagination a {
+      color:var(--blue);
+      border:1px solid #d9dfeb;
+      background:#fff;
+      font-weight:750;
+    }
+
+    .pagination span {
+      color:var(--muted);
+    }
+
     .secondary {
       border:1px solid #d9dfeb;
       background:#fff;
@@ -439,23 +539,7 @@ function e($valor) {
 <body>
 
 <div class="layout">
-  <aside>
-    <div class="brand">Marca<span>Fácil</span></div>
-
-    <div class="menu-title">Consultas</div>
-
-    <nav>
-      <a href="index.php">▦ &nbsp; Visão geral</a>
-      <a href="consulta_rpi.php">⌕ &nbsp; Consulta RPI</a>
-      <a href="processos.php">◫ &nbsp; Processos</a>
-      <a href="#" class="active">▤ &nbsp; Publicações</a>
-    </nav>
-
-    <div class="side-note">
-      <strong style="color:#fff; display:block; margin-bottom:4px;">Publicações</strong>
-      Acompanhe os principais despachos publicados nas RPIs.
-    </div>
-  </aside>
+  <?php require __DIR__ . '/menu.php'; ?>
 
   <main>
     <div class="header">
@@ -464,7 +548,7 @@ function e($valor) {
         <p>Visualize e filtre despachos publicados em revistas da propriedade industrial.</p>
       </div>
 
-      <span class="badge">Protótipo sem banco</span>
+      <span class="badge">Dados reais da RPI</span>
     </div>
 
     <section class="filters">
@@ -490,6 +574,8 @@ function e($valor) {
             <option value="Oposição" <?= $tipo === 'Oposição' ? 'selected' : '' ?>>Oposição</option>
             <option value="Prorrogação" <?= $tipo === 'Prorrogação' ? 'selected' : '' ?>>Prorrogação</option>
             <option value="Registro" <?= $tipo === 'Registro' ? 'selected' : '' ?>>Registro</option>
+            <option value="Indeferimento" <?= $tipo === 'Indeferimento' ? 'selected' : '' ?>>Indeferimento</option>
+            <option value="Outros" <?= $tipo === 'Outros' ? 'selected' : '' ?>>Outros</option>
           </select>
         </label>
 
@@ -510,7 +596,7 @@ function e($valor) {
     <section class="panel">
       <div class="panel-head">
         <h2>Publicações encontradas</h2>
-        <span><?= count($filtradas) ?> resultado(s)</span>
+        <span><?= $totalFiltradas ?> resultado(s)</span>
       </div>
 
       <?php if (!$filtradas): ?>
@@ -536,47 +622,57 @@ function e($valor) {
               <?php
                 $classe = 'blue';
 
-                if ($item['tipo'] === 'Deferimento' || $item['tipo'] === 'Registro') {
+                if (($item['tipo'] ?? '') === 'Deferimento' || ($item['tipo'] ?? '') === 'Registro') {
                     $classe = 'green';
-                } elseif ($item['tipo'] === 'Oposição') {
+                } elseif (($item['tipo'] ?? '') === 'Oposição') {
                     $classe = 'amber';
-                } elseif ($item['tipo'] === 'Prorrogação') {
+                } elseif (($item['tipo'] ?? '') === 'Indeferimento') {
+                    $classe = 'red';
+                } elseif (($item['tipo'] ?? '') === 'Prorrogação') {
                     $classe = 'blue';
                 }
+
+                $numeroRpi = trim((string)($item['rpi'] ?? ''));
+                $edicaoRpi = $edicoesRpi[$numeroRpi] ?? ['local' => '', 'oficial' => '', 'tamanho' => 0];
+                $linkRpi = $edicaoRpi['local'] !== '' ? $edicaoRpi['local'] : $edicaoRpi['oficial'];
+                $tamanhoRpi = $edicaoRpi['tamanho'] > 0
+                    ? number_format($edicaoRpi['tamanho'] / 1048576, 1, ',', '.') . ' MB'
+                    : '';
+                $paginaPdf = max(1, (int)($item['pagina'] ?? 1));
               ?>
 
               <tr>
                 <td>
-                  <strong><?= e($item['marca']) ?></strong>
-                  <small><?= e($item['titular']) ?></small>
+                  <strong><?= e($item['marca'] ?? 'Marca não informada') ?></strong>
+                  <small><?= e($item['titular'] ?? 'Titular não informado') ?></small>
                 </td>
 
-                <td><?= e($item['processo']) ?></td>
+                <td><?= e($item['processo'] ?? '') ?></td>
 
                 <td>
                   <span class="tag <?= e($classe) ?>">
-                    <?= e($item['tipo']) ?>
+                    <?= e($item['tipo'] ?? 'Outros') ?>
                   </span>
                 </td>
 
                 <td>
-                  <strong><?= e($item['rpi']) ?></strong>
-                  <small>Página <?= e($item['pagina']) ?></small>
+                  <strong><?= e($item['rpi'] ?? '') ?></strong>
+                  <small>Página <?= e($item['pagina'] ?? 'não informada') ?></small>
                 </td>
 
-                <td><?= e($item['data']) ?></td>
+                <td><?= e($item['data'] ?? '') ?></td>
 
-                <td><?= e($item['despacho']) ?></td>
+                <td><?= e($item['despacho'] ?? '') ?></td>
 
                 <td>
                   <div class="actions">
-                    <button class="secondary ver-processo" type="button">
+                    <a class="secondary" href="detalhes_processo.php?processo=<?= urlencode((string)($item['processo'] ?? '')) ?>">
                       Ver processo
-                    </button>
+                    </a>
 
-                    <button class="primary ver-rpi" type="button">
-                      Ver RPI
-                    </button>
+                    <a class="primary" href="<?= $linkRpi !== '' ? e($linkRpi) . '#page=' . $paginaPdf : 'rpi.php' ?>" <?= $linkRpi !== '' ? 'target="_blank" rel="noopener"' : '' ?> title="<?= $tamanhoRpi !== '' ? 'PDF com ' . e($tamanhoRpi) : 'Consultar edição da RPI' ?>">
+                      <?= $edicaoRpi['local'] !== '' ? 'Abrir PDF salvo' : 'Abrir PDF oficial' ?><?= $tamanhoRpi !== '' ? ' (' . e($tamanhoRpi) . ')' : '' ?>
+                    </a>
                   </div>
                 </td>
               </tr>
@@ -584,23 +680,23 @@ function e($valor) {
           </tbody>
         </table>
       <?php endif; ?>
+
+      <?php if ($totalPaginas > 1): ?>
+        <nav class="pagination" aria-label="Paginação dos resultados">
+          <?php if ($pagina > 1): ?>
+            <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'rpi' => $rpi, 'pagina' => $pagina - 1])) ?>">← Anterior</a>
+          <?php endif; ?>
+
+          <span>Página <?= $pagina ?> de <?= $totalPaginas ?></span>
+
+          <?php if ($pagina < $totalPaginas): ?>
+            <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'rpi' => $rpi, 'pagina' => $pagina + 1])) ?>">Próxima →</a>
+          <?php endif; ?>
+        </nav>
+      <?php endif; ?>
     </section>
   </main>
 </div>
-
-<script>
-document.querySelectorAll('.ver-rpi').forEach(button => {
-  button.addEventListener('click', () => {
-    alert('Depois este botão abrirá a revista e a página exata da publicação.');
-  });
-});
-
-document.querySelectorAll('.ver-processo').forEach(button => {
-  button.addEventListener('click', () => {
-    alert('Depois este botão abrirá os detalhes completos do processo.');
-  });
-});
-</script>
 
 </body>
 </html>

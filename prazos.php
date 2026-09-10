@@ -797,10 +797,20 @@ td small {
 }
 
 .empty {
-    padding:40px 24px;
+    padding:20px 24px;
     text-align:center;
     color:var(--muted);
 }
+
+body:has(.panel .empty) main {
+    padding-top:24px;
+    padding-bottom:12px;
+}
+
+body:has(.panel .empty) .header { margin-bottom:18px; }
+body:has(.panel .empty) .metrics { margin-bottom:16px; }
+body:has(.panel .empty) .top-actions { margin-bottom:16px; }
+body:has(.panel .empty) .filters { margin-bottom:16px; }
 
 dialog {
     border:0;

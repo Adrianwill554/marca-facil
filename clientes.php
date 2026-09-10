@@ -95,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($acao === 'salvar') {
 
+        $idEdicao = (int)($_POST['id'] ?? 0);
         $nome = trim($_POST['nome'] ?? '');
         $cpfCnpj = trim($_POST['cpf_cnpj'] ?? '');
         $email = trim($_POST['email'] ?? '');
@@ -112,31 +113,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $camposExtras[$campo] = trim((string) ($_POST[$campo] ?? ''));
         }
 
+        $documentoNumerico = preg_replace('/\D+/', '', $cpfCnpj);
+        if ($camposExtras['tipo_pessoa'] === '') {
+            $camposExtras['tipo_pessoa'] = strlen($documentoNumerico) === 14
+                ? 'Pessoa jurídica'
+                : (strlen($documentoNumerico) === 11 ? 'Pessoa física' : 'Não informado');
+        }
+
+        $documentoDuplicado = false;
+        if ($documentoNumerico !== '') {
+            foreach ($clientes as $clienteExistente) {
+                if (
+                    (int)($clienteExistente['id'] ?? 0) !== $idEdicao
+                    && preg_replace('/\D+/', '', (string)($clienteExistente['cpf_cnpj'] ?? '')) === $documentoNumerico
+                ) {
+                    $documentoDuplicado = true;
+                    break;
+                }
+            }
+        }
+
         if ($nome === '') {
             $erro = 'Informe o nome do cliente.';
+        } elseif ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $erro = 'Informe um e-mail válido.';
+        } elseif ($documentoDuplicado) {
+            $erro = 'Já existe um cliente cadastrado com este CPF/CNPJ.';
         } else {
-
-            $novoId = 1;
-
-            if ($clientes) {
-                $ids = array_map(
-                    fn($cliente) => (int)($cliente['id'] ?? 0),
-                    $clientes
-                );
-
-                $novoId = max($ids) + 1;
-            }
-
-            $clientes[] = [
-                'id' => $novoId,
+            $dadosCliente = [
                 'nome' => $nome,
                 'cpf_cnpj' => $cpfCnpj,
                 'email' => $email,
                 'telefone' => $telefone,
                 'observacoes' => $observacoes,
-                ...$camposExtras,
-                'criado_em' => date('Y-m-d H:i:s')
+                ...$camposExtras
             ];
+
+            $atualizou = false;
+            if ($idEdicao > 0) {
+                foreach ($clientes as &$clienteExistente) {
+                    if ((int)($clienteExistente['id'] ?? 0) === $idEdicao) {
+                        $clienteExistente = [...$clienteExistente, ...$dadosCliente, 'atualizado_em' => date('Y-m-d H:i:s')];
+                        $atualizou = true;
+                        break;
+                    }
+                }
+                unset($clienteExistente);
+            }
+
+            if (!$atualizou) {
+                $ids = array_map(fn($cliente) => (int)($cliente['id'] ?? 0), $clientes);
+                $clientes[] = ['id' => $ids ? max($ids) + 1 : 1, ...$dadosCliente, 'criado_em' => date('Y-m-d H:i:s')];
+            }
 
             $salvou = file_put_contents(
                 $arquivoClientes,
@@ -150,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($salvou === false) {
                 $erro = 'Não foi possível salvar o cliente.';
             } else {
-                $sucesso = 'Cliente cadastrado com sucesso!';
+                $sucesso = $atualizou ? 'Cliente atualizado com sucesso!' : 'Cliente cadastrado com sucesso!';
             }
         }
     }
@@ -983,6 +1011,10 @@ label {
 
                             <div class="row-actions">
 
+                                <button type="button" class="secondary editar" data-cliente='<?= e(json_encode($cliente, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?>'>
+                                    Editar
+                                </button>
+
                                 <button
                                     type="button"
                                     class="secondary detalhes"
@@ -1053,13 +1085,14 @@ label {
 
 <div class="modal">
 
-    <h2>Novo cliente</h2>
+    <h2 id="tituloClienteModal">Novo cliente</h2>
 
     <p>Preencha os dados principais do cliente.</p>
 
     <form method="POST">
 
         <input type="hidden" name="acao" value="salvar">
+        <input type="hidden" name="id" id="clienteId" value="0">
 
         <div class="form-grid">
 
@@ -1113,6 +1146,31 @@ label {
                 ></textarea>
             </label>
 
+            <details class="full" id="maisInformacoes">
+                <summary>Mais informações (opcional)</summary>
+                <div class="form-grid" style="margin-top:16px;">
+                    <label>Tipo de pessoa<select name="tipo_pessoa"><option value="">Automático pelo CPF/CNPJ</option><option>Pessoa física</option><option>Pessoa jurídica</option></select></label>
+                    <label>Apelido / nome de busca<input name="apelido" type="text"></label>
+                    <label>Natureza jurídica<input name="natureza_juridica" type="text" placeholder="Ex.: MEI, LTDA, associação"></label>
+                    <label>Status<select name="status"><option value="Ativo">Ativo</option><option value="Inativo">Inativo</option></select></label>
+                    <label>Responsável<input name="responsavel" type="text"></label>
+                    <label>Contato principal<input name="contato_nome" type="text"></label>
+                    <label>Pasta / identificador<input name="pasta" type="text"></label>
+                    <label>Serviços<input name="servicos" type="text" placeholder="Ex.: Marca BR, contratos"></label>
+                    <label>Inscrição municipal<input name="inscricao_municipal" type="text"></label>
+                    <label>Inscrição estadual<input name="inscricao_estadual" type="text"></label>
+                    <label class="full">Logradouro<input name="logradouro" type="text"></label>
+                    <label>Número<input name="numero" type="text"></label>
+                    <label>Complemento<input name="complemento" type="text"></label>
+                    <label>Bairro<input name="bairro" type="text"></label>
+                    <label>Cidade<input name="cidade" type="text"></label>
+                    <label>UF<input name="uf" type="text" maxlength="2"></label>
+                    <label>CEP<input name="cep" type="text"></label>
+                    <label>País<input name="pais" type="text" value="Brasil"></label>
+                    <label class="full">Objeto social<textarea name="objeto_social" rows="3"></textarea></label>
+                </div>
+            </details>
+
         </div>
 
         <div class="modal-actions">
@@ -1129,7 +1187,7 @@ label {
                 type="submit"
                 class="primary"
             >
-                Salvar cliente
+                <span id="textoSalvarCliente">Salvar cliente</span>
             </button>
 
         </div>
@@ -1174,6 +1232,21 @@ label {
             <strong id="detalheTelefone">—</strong>
         </div>
 
+        <div class="detail-item">
+            <span>Tipo / Natureza</span>
+            <strong id="detalheTipo">—</strong>
+        </div>
+
+        <div class="detail-item">
+            <span>Responsável</span>
+            <strong id="detalheResponsavel">—</strong>
+        </div>
+
+        <div class="detail-item full">
+            <span>Endereço</span>
+            <strong id="detalheEndereco">—</strong>
+        </div>
+
         <div class="detail-item full">
             <span>Observações</span>
             <strong id="detalheObservacoes">—</strong>
@@ -1214,11 +1287,32 @@ const novoClienteModal =
 const detalhesModal =
     document.querySelector('#detalhesModal');
 
+const formularioCliente = novoClienteModal.querySelector('form');
+const camposCliente = [
+    'nome','cpf_cnpj','telefone','email','observacoes','tipo_pessoa','apelido',
+    'natureza_juridica','status','responsavel','contato_nome','pasta','servicos',
+    'inscricao_municipal','inscricao_estadual','logradouro','numero','complemento',
+    'bairro','cidade','uf','cep','pais','objeto_social'
+];
+
+function prepararNovoCliente() {
+    formularioCliente.reset();
+    formularioCliente.querySelector('[name="id"]').value = '0';
+    formularioCliente.querySelector('[name="pais"]').value = 'Brasil';
+    formularioCliente.querySelector('[name="status"]').value = 'Ativo';
+    document.querySelector('#tituloClienteModal').textContent = 'Novo cliente';
+    document.querySelector('#textoSalvarCliente').textContent = 'Salvar cliente';
+    document.querySelector('#maisInformacoes').open = false;
+}
+
 document
 .querySelector('#abrirNovoCliente')
 .addEventListener(
     'click',
-    () => novoClienteModal.showModal()
+    () => {
+        prepararNovoCliente();
+        novoClienteModal.showModal();
+    }
 );
 
 document
@@ -1227,6 +1321,42 @@ document
     'click',
     () => novoClienteModal.close()
 );
+
+document.querySelectorAll('.editar').forEach(button => {
+    button.addEventListener('click', () => {
+        const cliente = JSON.parse(button.dataset.cliente);
+        prepararNovoCliente();
+        formularioCliente.querySelector('[name="id"]').value = cliente.id || 0;
+        camposCliente.forEach(nome => {
+            const campo = formularioCliente.querySelector(`[name="${nome}"]`);
+            if (campo) campo.value = cliente[nome] || '';
+        });
+        document.querySelector('#tituloClienteModal').textContent = 'Editar cliente';
+        document.querySelector('#textoSalvarCliente').textContent = 'Salvar alterações';
+        document.querySelector('#maisInformacoes').open = true;
+        novoClienteModal.showModal();
+    });
+});
+
+const campoDocumento = formularioCliente.querySelector('[name="cpf_cnpj"]');
+campoDocumento.addEventListener('input', () => {
+    let valor = campoDocumento.value.replace(/\D/g, '').slice(0, 14);
+    if (valor.length <= 11) {
+        valor = valor.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+    } else {
+        valor = valor.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
+    }
+    campoDocumento.value = valor;
+});
+
+formularioCliente.querySelector('[name="cep"]').addEventListener('input', event => {
+    const numeros = event.target.value.replace(/\D/g, '').slice(0, 8);
+    event.target.value = numeros.replace(/(\d{5})(\d)/, '$1-$2');
+});
+
+formularioCliente.querySelector('[name="uf"]').addEventListener('input', event => {
+    event.target.value = event.target.value.replace(/[^a-z]/gi, '').slice(0, 2).toUpperCase();
+});
 
 document
 .querySelectorAll('.detalhes')
@@ -1279,6 +1409,22 @@ document
             .textContent =
                 cliente.telefone
                 || 'Não informado';
+
+            document.querySelector('#detalheTipo').textContent =
+                [cliente.tipo_pessoa, cliente.natureza_juridica].filter(Boolean).join(' · ') || 'Não informado';
+
+            document.querySelector('#detalheResponsavel').textContent =
+                cliente.responsavel || cliente.contato_nome || 'Não informado';
+
+            document.querySelector('#detalheEndereco').textContent =
+                [
+                    [cliente.logradouro, cliente.numero].filter(Boolean).join(', '),
+                    cliente.complemento,
+                    cliente.bairro,
+                    [cliente.cidade, cliente.uf].filter(Boolean).join(' - '),
+                    cliente.cep,
+                    cliente.pais
+                ].filter(Boolean).join(' · ') || 'Não informado';
 
             document
             .querySelector('#detalheObservacoes')

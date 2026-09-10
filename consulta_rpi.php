@@ -30,6 +30,31 @@ if (file_exists($arquivoDados)) {
     }
 }
 
+$edicoesRpi = [];
+$arquivoEdicoes = __DIR__ . '/rpis.json';
+
+if (is_file($arquivoEdicoes)) {
+    $conteudo = file_get_contents($arquivoEdicoes);
+    $edicoes = $conteudo !== false ? json_decode($conteudo, true) : null;
+
+    if (is_array($edicoes)) {
+        foreach ($edicoes as $edicao) {
+            $numero = trim((string)($edicao['numero'] ?? ''));
+            if ($numero === '') continue;
+
+            $arquivo = trim((string)($edicao['arquivo'] ?? ''));
+            $urlOficial = trim((string)($edicao['url_origem'] ?? ''));
+            $edicoesRpi[$numero] = [
+                'local' => $arquivo !== '' && is_file(__DIR__ . '/rpis/' . $arquivo)
+                    ? 'rpis/' . rawurlencode($arquivo)
+                    : '',
+                'oficial' => filter_var($urlOficial, FILTER_VALIDATE_URL) ? $urlOficial : '',
+                'tamanho' => (int)($edicao['tamanho'] ?? 0),
+            ];
+        }
+    }
+}
+
 if (
     $termo !== ''
     ||
@@ -497,6 +522,12 @@ select:focus {
     min-width:140px;
 }
 
+.result-actions a {
+    display:block;
+    text-align:center;
+    text-decoration:none;
+}
+
 .secondary {
     border:1px solid #d9dfeb;
     background:#fff;
@@ -835,6 +866,17 @@ Tente alterar os filtros da pesquisa.
 
 <?php foreach ($resultados as $item): ?>
 
+<?php
+$numeroProcesso = preg_replace('/\D+/', '', (string)($item['processo'] ?? ''));
+$numeroRpi = trim((string)($item['rpi'] ?? ''));
+$edicaoRpi = $edicoesRpi[$numeroRpi] ?? ['local' => '', 'oficial' => '', 'tamanho' => 0];
+$linkRpi = $edicaoRpi['local'] !== '' ? $edicaoRpi['local'] : $edicaoRpi['oficial'];
+$paginaPdf = max(1, (int)($item['pagina'] ?? 1));
+$tamanhoRpi = $edicaoRpi['tamanho'] > 0
+    ? number_format($edicaoRpi['tamanho'] / 1048576, 1, ',', '.') . ' MB'
+    : '';
+?>
+
 <article class="result-card">
 
 <div>
@@ -948,25 +990,25 @@ Despacho publicado
 
 <div class="result-actions">
 
-<button
+<a
 class="secondary"
-type="button"
+href="detalhes_processo.php?processo=<?= urlencode($numeroProcesso) ?>"
 >
 
 Ver processo
 
-</button>
+</a>
 
-<button
-class="primary ver-rpi"
-type="button"
-data-rpi="<?= e($item['rpi'] ?? '') ?>"
-data-pagina="<?= e($item['pagina'] ?? '') ?>"
+<a
+class="primary"
+href="<?= $linkRpi !== '' ? e($linkRpi) . '#page=' . $paginaPdf : 'rpi.php' ?>"
+<?= $linkRpi !== '' ? 'target="_blank" rel="noopener"' : '' ?>
+title="<?= $tamanhoRpi !== '' ? 'PDF com ' . e($tamanhoRpi) : 'Consultar edição da RPI' ?>"
 >
 
-Ver na RPI
+<?= $edicaoRpi['local'] !== '' ? 'Ver PDF salvo' : 'Ver na RPI' ?><?= $tamanhoRpi !== '' ? ' (' . e($tamanhoRpi) . ')' : '' ?>
 
-</button>
+</a>
 
 </div>
 
@@ -1018,32 +1060,6 @@ document
                 button.dataset.despacho;
 
             input.focus();
-        }
-    );
-
-});
-
-document
-.querySelectorAll('.ver-rpi')
-.forEach(button => {
-
-    button.addEventListener(
-        'click',
-        () => {
-
-            const rpi =
-                button.dataset.rpi;
-
-            const pagina =
-                button.dataset.pagina;
-
-            alert(
-                'RPI '
-                + rpi
-                + ' · Página '
-                + pagina
-                + '\n\nDepois vamos ligar este botão ao PDF real da revista.'
-            );
         }
     );
 

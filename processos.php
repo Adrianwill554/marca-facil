@@ -176,11 +176,6 @@ foreach ($publicacoes as $item) {
 
 $processos = array_values($processosAgrupados);
 
-$processos = array_values(array_filter(
-    $processos,
-    fn(array $processo): bool => isset($monitorados[$processo['processo']])
-));
-
 foreach ($processos as &$processo) {
     $numero = $processo['processo'];
     $clienteId = $vinculos[$numero] ?? null;
@@ -208,6 +203,13 @@ $filtrados = array_filter($processos, function ($item) use ($busca, $tipo) {
 
     return $okBusca && $okTipo;
 });
+
+$filtrados = array_values($filtrados);
+$totalFiltrados = count($filtrados);
+$porPagina = 24;
+$totalPaginas = max(1, (int)ceil($totalFiltrados / $porPagina));
+$paginaAtualLista = max(1, min((int)($_GET['pagina'] ?? 1), $totalPaginas));
+$filtrados = array_slice($filtrados, ($paginaAtualLista - 1) * $porPagina, $porPagina);
 
 $totalProcessos = count($processos);
 $totalPublicacoes = array_sum(array_column($processos, 'total_publicacoes'));
@@ -465,23 +467,34 @@ select {
     font-size:13px;
 }
 
+.process-grid {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:16px;
+    padding:18px;
+    border-top:1px solid var(--line);
+}
+
 .table-wrap {
-    overflow:auto;
+    width:100%;
+    overflow:visible;
 }
 
 table {
     width:100%;
+    table-layout:fixed;
     border-collapse:collapse;
-    min-width:1100px;
 }
 
 th,
 td {
-    padding:14px 16px;
+    min-width:0;
+    padding:14px 12px;
     border-top:1px solid var(--line);
     text-align:left;
     font-size:13px;
-    vertical-align:middle;
+    vertical-align:top;
+    overflow-wrap:anywhere;
 }
 
 th {
@@ -491,13 +504,72 @@ th {
     font-size:11px;
 }
 
-td strong {
-    display:block;
-    margin-bottom:3px;
+th:nth-child(1) { width:19%; }
+th:nth-child(2) { width:14%; }
+th:nth-child(3) { width:22%; }
+th:nth-child(4) { width:22%; }
+th:nth-child(5) { width:23%; }
+
+td strong { display:block; margin-bottom:3px; }
+td small { color:var(--muted); }
+
+.process-card {
+    min-width:0;
+    padding:18px;
+    border:1px solid var(--line);
+    border-radius:13px;
+    background:#fff;
 }
 
-td small {
+.process-card-head {
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:12px;
+    margin-bottom:15px;
+}
+
+.process-card h3 {
+    font-size:16px;
+    overflow-wrap:anywhere;
+}
+
+.process-card small {
+    display:block;
     color:var(--muted);
+    margin-top:4px;
+    overflow-wrap:anywhere;
+}
+
+.process-info {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+    margin-bottom:15px;
+}
+
+.process-info div {
+    min-width:0;
+    padding:11px;
+    background:#f8faff;
+    border-radius:9px;
+}
+
+.process-info span {
+    display:block;
+    color:var(--muted);
+    font-size:11px;
+    margin-bottom:5px;
+}
+
+.process-info strong {
+    display:block;
+    font-size:13px;
+    overflow-wrap:anywhere;
+}
+
+.process-info .wide {
+    grid-column:1/-1;
 }
 
 .tag {
@@ -514,12 +586,16 @@ td small {
 .tag.red { color:#a6283a; background:#ffeaed; }
 
 .client-form {
-    display:flex;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
     gap:7px;
-    min-width:260px;
+    min-width:0;
+    margin-bottom:14px;
 }
 
 .client-form select {
+    min-width:0;
+    width:100%;
     padding:8px 9px;
     font-size:12px;
 }
@@ -529,6 +605,31 @@ td small {
     gap:7px;
     flex-wrap:wrap;
 }
+
+.pagination {
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:10px;
+    padding:18px;
+    border-top:1px solid var(--line);
+}
+
+.pagination a,
+.pagination span {
+    padding:9px 12px;
+    border-radius:8px;
+    font-size:13px;
+    text-decoration:none;
+}
+
+.pagination a {
+    color:var(--blue);
+    border:1px solid #d9dfeb;
+    font-weight:750;
+}
+
+.pagination span { color:var(--muted); }
 
 .empty {
     padding:40px 24px;
@@ -545,6 +646,25 @@ td small {
     main { padding:24px 16px; }
     .header { flex-direction:column; }
     .metrics { grid-template-columns:1fr 1fr; }
+    .process-grid { grid-template-columns:1fr; }
+
+    table,tbody,tr,td { display:block; width:100%; }
+    thead { display:none; }
+    tr { padding:16px; border-top:1px solid var(--line); }
+    td { padding:8px 0; border:0; }
+    td::before {
+        display:block;
+        color:var(--muted);
+        font-size:10px;
+        font-weight:800;
+        text-transform:uppercase;
+        margin-bottom:5px;
+    }
+    td:nth-child(1)::before { content:'Marca / Titular'; }
+    td:nth-child(2)::before { content:'Processo'; }
+    td:nth-child(3)::before { content:'Última publicação'; }
+    td:nth-child(4)::before { content:'Cliente vinculado'; }
+    td:nth-child(5)::before { content:'Ações'; }
 }
 
 @media(max-width:560px) {
@@ -552,6 +672,10 @@ td small {
     .filter-grid {
         grid-template-columns:1fr;
     }
+
+    .process-info { grid-template-columns:1fr; }
+    .process-info .wide { grid-column:auto; }
+    .client-form { grid-template-columns:1fr; }
 }
 </style>
 </head>
@@ -643,7 +767,7 @@ td small {
 
 <div class="panel-head">
     <h2>Processos encontrados</h2>
-    <span><?= count($filtrados) ?> resultado(s)</span>
+    <span><?= $totalFiltrados ?> resultado(s)</span>
 </div>
 
 <?php if (!$filtrados): ?>
@@ -750,6 +874,13 @@ td small {
 <div class="actions">
 
     <a
+        class="primary"
+        href="detalhes_processo.php?processo=<?= urlencode($item['processo']) ?>"
+    >
+        Ver detalhes
+    </a>
+
+    <a
         class="secondary"
         href="gerar_extrato_rpi.php?processo=<?= urlencode($item['processo']) ?>"
     >
@@ -795,6 +926,20 @@ td small {
 
 </div>
 
+<?php endif; ?>
+
+<?php if ($totalPaginas > 1): ?>
+<nav class="pagination" aria-label="Paginação dos processos">
+    <?php if ($paginaAtualLista > 1): ?>
+    <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'pagina' => $paginaAtualLista - 1])) ?>">← Anterior</a>
+    <?php endif; ?>
+
+    <span>Página <?= $paginaAtualLista ?> de <?= $totalPaginas ?></span>
+
+    <?php if ($paginaAtualLista < $totalPaginas): ?>
+    <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'pagina' => $paginaAtualLista + 1])) ?>">Próxima →</a>
+    <?php endif; ?>
+</nav>
 <?php endif; ?>
 
 </section>

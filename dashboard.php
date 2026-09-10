@@ -107,6 +107,9 @@ $clientes = carregarJson(__DIR__ . '/clientes.json');
 $prazos = carregarJson(__DIR__ . '/prazos.json');
 $documentos = carregarJson(__DIR__ . '/documentos.json');
 $vinculos = carregarJson(__DIR__ . '/vinculos_processos.json');
+$monitoradosLista = carregarJson(__DIR__ . '/processos_monitorados.json');
+$decisoesSugestoes = carregarJson(__DIR__ . '/sugestoes_prazos.json');
+$edicoesRpi = carregarJson(__DIR__ . '/rpis.json');
 
 foreach ($publicacoes as &$item) {
     $item['tipo'] = detectarTipo($item['despacho'] ?? '');
@@ -137,6 +140,42 @@ $totalProcessos = count($processosUnicos);
 $totalPublicacoes = count($publicacoes);
 $totalClientes = count($clientes);
 $totalDocumentos = count($documentos);
+
+$monitorados = [];
+foreach ($monitoradosLista as $monitorado) {
+    $numero = trim((string)($monitorado['processo'] ?? ''));
+    if ($numero !== '') $monitorados[$numero] = true;
+}
+
+$totalSemCliente = count(array_filter(
+    array_keys($monitorados),
+    fn($numero) => empty($vinculos[$numero])
+));
+
+$totalSugestoes = 0;
+foreach ($publicacoes as $publicacao) {
+    $numero = trim((string)($publicacao['processo'] ?? ''));
+    if (!isset($monitorados[$numero])) continue;
+    $texto = mb_strtolower((string)($publicacao['despacho'] ?? ''));
+    $relevante = str_contains($texto, 'oposi') || str_contains($texto, 'exig')
+        || str_contains($texto, 'defer') || str_contains($texto, 'indefer')
+        || str_contains($texto, 'prorroga');
+    if (!$relevante) continue;
+    $chave = hash('sha256', implode('|', [
+        $publicacao['processo'] ?? '', $publicacao['rpi'] ?? '',
+        $publicacao['codigo_despacho'] ?? '', $publicacao['despacho'] ?? ''
+    ]));
+    if (!isset($decisoesSugestoes[$chave])) $totalSugestoes++;
+}
+
+$ultimaEdicao = null;
+foreach ($edicoesRpi as $edicao) {
+    if ($ultimaEdicao === null || (int)($edicao['numero'] ?? 0) > (int)($ultimaEdicao['numero'] ?? 0)) {
+        $ultimaEdicao = $edicao;
+    }
+}
+$numeroUltimaRpi = $ultimaEdicao['numero'] ?? 'Nenhuma';
+$dataUltimaRpi = $ultimaEdicao['data'] ?? 'Não sincronizada';
 
 $totalDeferimentos = count(
     array_filter(
@@ -410,6 +449,24 @@ main {
     margin-bottom:22px;
 }
 
+.attention {
+    background:#111827;
+    color:#fff;
+    border-radius:16px;
+    padding:20px;
+    margin-bottom:22px;
+}
+
+.attention-head { display:flex; justify-content:space-between; align-items:center; gap:15px; margin-bottom:15px; }
+.attention-head h2 { font-size:18px; }
+.attention-head span { color:#9fb0c8; font-size:12px; }
+.attention-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.attention-item { display:block; min-width:0; padding:14px; border:1px solid #334155; border-radius:11px; color:#fff; text-decoration:none; background:#1b2638; }
+.attention-item:hover { border-color:#78a5ff; background:#22314a; }
+.attention-item span { display:block; color:#aebcd0; font-size:11px; margin-bottom:6px; }
+.attention-item strong { display:block; font-size:20px; }
+.attention-item small { display:block; color:#c7d2e2; font-size:11px; margin-top:5px; overflow-wrap:anywhere; }
+
 .quick-card {
     padding:18px;
     text-decoration:none;
@@ -449,9 +506,29 @@ main {
 
 .grid {
     display:grid;
-    grid-template-columns:1fr 1fr;
+    grid-template-columns:minmax(0,1fr);
     gap:22px;
     margin-bottom:22px;
+    align-items:start;
+}
+
+.grid > .panel {
+    align-self:start;
+}
+
+.dashboard-columns {
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    gap:22px;
+    margin-bottom:22px;
+    align-items:start;
+}
+
+.dashboard-column {
+    display:grid;
+    gap:22px;
+    min-width:0;
+    align-content:start;
 }
 
 .panel {
@@ -546,6 +623,7 @@ main {
     .quick-actions {
         grid-template-columns:repeat(2,1fr);
     }
+    .attention-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 
 @media(max-width:900px) {
@@ -582,6 +660,8 @@ main {
     .grid {
         grid-template-columns:1fr;
     }
+
+    .dashboard-columns { grid-template-columns:1fr; }
 }
 
 @media(max-width:600px) {
@@ -589,6 +669,7 @@ main {
     .quick-actions {
         grid-template-columns:1fr;
     }
+    .attention-grid { grid-template-columns:1fr; }
 }
 </style>
 </head>
@@ -640,6 +721,35 @@ main {
         <small><?= $totalPrazosConcluidos ?> prazo(s) concluído(s)</small>
     </div>
 
+</section>
+
+<section class="attention">
+    <div class="attention-head">
+        <h2>Central de atenção</h2>
+        <span>Atualizada automaticamente com os dados do sistema</span>
+    </div>
+    <div class="attention-grid">
+        <a class="attention-item" href="prazos.php?status=Urgente">
+            <span>Prazos urgentes ou atrasados</span>
+            <strong><?= $totalPrazosUrgentes ?></strong>
+            <small>Abrir agenda de prazos</small>
+        </a>
+        <a class="attention-item" href="sugestoes_prazos.php">
+            <span>Sugestões para revisar</span>
+            <strong><?= $totalSugestoes ?></strong>
+            <small>Confirmar datas ou ignorar</small>
+        </a>
+        <a class="attention-item" href="processos.php">
+            <span>Monitorados sem cliente</span>
+            <strong><?= $totalSemCliente ?></strong>
+            <small>Vincular processos aos clientes</small>
+        </a>
+        <a class="attention-item" href="rpi.php">
+            <span>Última revista registrada</span>
+            <strong>RPI <?= e($numeroUltimaRpi) ?></strong>
+            <small><?= e($dataUltimaRpi) ?> · atualização diária às 20h</small>
+        </a>
+    </div>
 </section>
 
 <section class="quick-actions">
