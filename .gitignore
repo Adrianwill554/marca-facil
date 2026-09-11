@@ -8,6 +8,7 @@ node_modules/
 dist/
 build/
 backups/
+rpis/*.pdf
 
 # Configurações e dados privados
 .env

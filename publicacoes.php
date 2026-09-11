@@ -1,8 +1,13 @@
 <?php
 $paginaAtual = 'publicacoes';
+require_once __DIR__ . '/carteira_service.php';
 $tipo = $_GET['tipo'] ?? 'todas';
 $busca = trim($_GET['busca'] ?? '');
 $rpi = trim($_GET['rpi'] ?? '');
+$processoFiltro = preg_replace('/\D+/', '', (string)($_GET['processo'] ?? ''));
+$marcaFiltro = trim((string)($_GET['marca'] ?? ''));
+$titularFiltro = trim((string)($_GET['titular'] ?? ''));
+$despachoFiltro = trim((string)($_GET['despacho'] ?? ''));
 
 $publicacoes = [
     [
@@ -56,7 +61,7 @@ if (is_file($arquivoDados)) {
     $dadosReais = $conteudo !== false ? json_decode($conteudo, true) : null;
 
     if (is_array($dadosReais)) {
-        $publicacoes = $dadosReais;
+        $publicacoes = filtrarPublicacoesDaCarteira($dadosReais);
     }
 }
 
@@ -99,7 +104,7 @@ foreach ($publicacoes as &$publicacao) {
 }
 unset($publicacao);
 
-$filtradas = array_filter($publicacoes, function ($item) use ($tipo, $busca, $rpi) {
+$filtradas = array_filter($publicacoes, function ($item) use ($tipo, $busca, $rpi, $processoFiltro, $marcaFiltro, $titularFiltro, $despachoFiltro) {
     $okTipo = $tipo === 'todas' || mb_strtolower($item['tipo']) === mb_strtolower($tipo);
 
     $texto = mb_strtolower(
@@ -111,8 +116,12 @@ $filtradas = array_filter($publicacoes, function ($item) use ($tipo, $busca, $rp
 
     $okBusca = $busca === '' || str_contains($texto, mb_strtolower($busca));
     $okRpi = $rpi === '' || $item['rpi'] === $rpi;
+    $okProcesso = $processoFiltro === '' || normalizarProcesso((string)($item['processo'] ?? '')) === $processoFiltro;
+    $okMarca = $marcaFiltro === '' || str_contains(mb_strtolower((string)($item['marca'] ?? '')), mb_strtolower($marcaFiltro));
+    $okTitular = $titularFiltro === '' || str_contains(mb_strtolower((string)($item['titular'] ?? '')), mb_strtolower($titularFiltro));
+    $okDespacho = $despachoFiltro === '' || str_contains(mb_strtolower((string)(($item['codigo_despacho'] ?? '').' '.($item['despacho'] ?? ''))), mb_strtolower($despachoFiltro));
 
-    return $okTipo && $okBusca && $okRpi;
+    return $okTipo && $okBusca && $okRpi && $okProcesso && $okMarca && $okTitular && $okDespacho;
 });
 
 $filtradas = array_values($filtradas);
@@ -292,7 +301,7 @@ function e($valor) {
 
     .filter-grid {
       display:grid;
-      grid-template-columns:1.2fr .8fr .7fr auto;
+      grid-template-columns:repeat(4,minmax(150px,1fr));
       gap:12px;
       align-items:end;
     }
@@ -589,7 +598,12 @@ function e($valor) {
           >
         </label>
 
+        <label>Processo<input name="processo" value="<?= e($processoFiltro) ?>" inputmode="numeric" placeholder="Número exato"></label>
+        <label>Marca<input name="marca" value="<?= e($marcaFiltro) ?>" placeholder="Nome da marca"></label>
+        <label>Titular<input name="titular" value="<?= e($titularFiltro) ?>" placeholder="Nome do titular"></label>
+        <label>Código ou despacho<input name="despacho" value="<?= e($despachoFiltro) ?>" placeholder="Ex.: IPAS009 ou oposição"></label>
         <button class="primary" type="submit">Filtrar</button>
+        <a class="secondary" href="publicacoes.php" style="padding:10px;text-align:center;text-decoration:none">Limpar</a>
       </form>
     </section>
 
@@ -604,9 +618,13 @@ function e($valor) {
           Nenhuma publicação encontrada com esses filtros.
         </div>
       <?php else: ?>
+        <form method="post" action="exportar_publicacoes.php">
+          <?php foreach (['busca'=>$busca,'tipo'=>$tipo,'rpi'=>$rpi,'processo'=>$processoFiltro,'marca'=>$marcaFiltro,'titular'=>$titularFiltro,'despacho'=>$despachoFiltro] as $nome=>$valor): ?><input type="hidden" name="<?= e($nome) ?>" value="<?= e($valor) ?>"><?php endforeach; ?>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--line)"><button class="primary" name="formato" value="pdf">Baixar PDF</button><button class="secondary" name="formato" value="csv">Baixar CSV</button><small style="align-self:center;color:var(--muted)">Marque os processos desejados; sem seleção, exporta todos os resultados.</small></div>
         <table>
           <thead>
             <tr>
+              <th><input type="checkbox" aria-label="Selecionar todos" onclick="document.querySelectorAll('.selecionar-publicacao').forEach(c=>c.checked=this.checked)"></th>
               <th>Marca / Titular</th>
               <th>Processo</th>
               <th>Tipo</th>
@@ -642,6 +660,7 @@ function e($valor) {
               ?>
 
               <tr>
+                <td><input class="selecionar-publicacao" type="checkbox" name="processos[]" value="<?= e((string)($item['processo'] ?? '')) ?>"></td>
                 <td>
                   <strong><?= e($item['marca'] ?? 'Marca não informada') ?></strong>
                   <small><?= e($item['titular'] ?? 'Titular não informado') ?></small>
@@ -679,18 +698,19 @@ function e($valor) {
             <?php endforeach; ?>
           </tbody>
         </table>
+        </form>
       <?php endif; ?>
 
       <?php if ($totalPaginas > 1): ?>
         <nav class="pagination" aria-label="Paginação dos resultados">
           <?php if ($pagina > 1): ?>
-            <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'rpi' => $rpi, 'pagina' => $pagina - 1])) ?>">← Anterior</a>
+            <a href="?<?= e(http_build_query(['busca'=>$busca,'tipo'=>$tipo,'rpi'=>$rpi,'processo'=>$processoFiltro,'marca'=>$marcaFiltro,'titular'=>$titularFiltro,'despacho'=>$despachoFiltro,'pagina'=>$pagina-1])) ?>">← Anterior</a>
           <?php endif; ?>
 
           <span>Página <?= $pagina ?> de <?= $totalPaginas ?></span>
 
           <?php if ($pagina < $totalPaginas): ?>
-            <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'rpi' => $rpi, 'pagina' => $pagina + 1])) ?>">Próxima →</a>
+            <a href="?<?= e(http_build_query(['busca'=>$busca,'tipo'=>$tipo,'rpi'=>$rpi,'processo'=>$processoFiltro,'marca'=>$marcaFiltro,'titular'=>$titularFiltro,'despacho'=>$despachoFiltro,'pagina'=>$pagina+1])) ?>">Próxima →</a>
           <?php endif; ?>
         </nav>
       <?php endif; ?>

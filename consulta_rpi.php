@@ -1,5 +1,6 @@
 <?php
 $paginaAtual = 'consulta_rpi';
+require_once __DIR__ . '/carteira_service.php';
 
 $termo = trim($_GET['termo'] ?? '');
 $filtro = $_GET['filtro'] ?? 'todos';
@@ -27,6 +28,7 @@ if (file_exists($arquivoDados)) {
         if (!is_array($dados)) {
             $dados = [];
         }
+        $dados = filtrarPublicacoesDaCarteira($dados);
     }
 }
 

@@ -1,6 +1,8 @@
 <?php
 $paginaAtual = 'processos';
+require_once __DIR__ . '/carteira_service.php';
 $numeroProcesso = preg_replace('/\D+/', '', (string)($_GET['processo'] ?? ''));
+$pertenceCarteira = processoPertenceACarteira($numeroProcesso);
 $publicacoes = [];
 $edicoesRpi = [];
 $mensagem = '';
@@ -16,7 +18,7 @@ $complementos = is_file($arquivoComplementos)
     : [];
 if (!is_array($complementos)) $complementos = [];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $numeroProcesso !== '') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $numeroProcesso !== '' && $pertenceCarteira) {
     $detalhes = [
         'apresentacao' => trim((string)($_POST['apresentacao'] ?? '')),
         'classes_nice' => trim((string)($_POST['classes_nice'] ?? '')),
@@ -59,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $numeroProcesso !== '') {
 $complemento = $complementos[$numeroProcesso] ?? [];
 
 $arquivoDados = __DIR__ . '/dados_rpi.json';
-if ($numeroProcesso !== '' && is_file($arquivoDados)) {
+if ($numeroProcesso !== '' && $pertenceCarteira && is_file($arquivoDados)) {
     $conteudo = file_get_contents($arquivoDados);
     $dados = $conteudo !== false ? json_decode($conteudo, true) : null;
 
@@ -154,7 +156,7 @@ main{width:100%;max-width:1300px;margin:0 auto;padding:34px 42px}
         <h1>Processo <?= e($numeroProcesso) ?></h1>
         <p>Histórico completo das publicações encontradas nas revistas RPI.</p>
       </div>
-      <span class="badge"><?= count($publicacoes) ?> publicação(ões)</span>
+      <div class="actions" style="margin-top:0"><span class="badge"><?= count($publicacoes) ?> publicação(ões)</span><a class="button" href="gerar_extrato_rpi.php?processo=<?= urlencode($numeroProcesso) ?>">Baixar extrato</a></div>
     </header>
 
     <section class="summary">
@@ -215,8 +217,12 @@ main{width:100%;max-width:1300px;margin:0 auto;padding:34px 42px}
           <div class="wide"><span>Despacho</span><strong><?= e($item['despacho'] ?? 'Não informado') ?></strong></div>
         </div>
         <div class="actions">
+          <?php if ($edicao['local'] !== '' && $pagina > 0): ?>
+            <a class="button" target="_blank" rel="noopener" href="folha_rpi.php?processo=<?= urlencode($numeroProcesso) ?>&amp;rpi=<?= urlencode($numeroRpi) ?>">Ver folha desta publicação</a>
+            <a class="button secondary" href="folha_rpi.php?processo=<?= urlencode($numeroProcesso) ?>&amp;rpi=<?= urlencode($numeroRpi) ?>&amp;modo=baixar">Baixar folha única</a>
+          <?php endif; ?>
           <?php if ($edicao['local'] !== ''): ?>
-            <a class="button" target="_blank" rel="noopener" href="<?= e($edicao['local']) ?>#page=<?= $pagina ?>">Abrir PDF salvo</a>
+            <a class="button secondary" target="_blank" rel="noopener" href="<?= e($edicao['local']) ?>#page=<?= $pagina ?>">Abrir revista completa</a>
           <?php endif; ?>
           <?php if ($edicao['oficial'] !== ''): ?>
             <a class="button secondary" target="_blank" rel="noopener" href="<?= e($edicao['oficial']) ?>#page=<?= $pagina ?>">Abrir PDF oficial</a>

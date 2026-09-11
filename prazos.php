@@ -1185,7 +1185,7 @@ dialog::backdrop {
 
     <a
         class="primary"
-        href="consulta_rpi.php?termo=<?= urlencode($prazo['processo'] ?? '') ?>&filtro=processo"
+        href="detalhes_processo.php?processo=<?= urlencode($prazo['processo'] ?? '') ?>"
     >
         Ver processo
     </a>

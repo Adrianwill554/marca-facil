@@ -1,5 +1,15 @@
 [
     {
+        "numero": 2905,
+        "data": "2026-09-08",
+        "arquivo": "rpi-2905-marcas.pdf",
+        "url_origem": "https:\/\/revistas.inpi.gov.br\/pdf\/Marcas2905.pdf",
+        "baixada_em": "2026-09-11T01:28:40+02:00",
+        "tamanho": 207537787,
+        "ultima_importacao_em": "2026-09-11T01:28:47+02:00",
+        "publicacoes_importadas": 50261
+    },
+    {
         "numero": 2904,
         "data": "2026-09-01",
         "arquivo": "rpi-2904-marcas.pdf",

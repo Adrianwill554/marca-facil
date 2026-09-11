@@ -1,8 +1,10 @@
 <?php
 $paginaAtual = 'processos';
+require_once __DIR__ . '/carteira_service.php';
 
 $busca = trim($_GET['busca'] ?? '');
 $tipo = $_GET['tipo'] ?? 'todos';
+$rpiFiltro = trim((string)($_GET['rpi'] ?? ''));
 
 function e($valor) {
     return htmlspecialchars((string)$valor, ENT_QUOTES, 'UTF-8');
@@ -138,7 +140,7 @@ $processosAgrupados = [];
 foreach ($publicacoes as $item) {
     $numero = trim((string)($item['processo'] ?? ''));
 
-    if ($numero === '') continue;
+    if ($numero === '' || !processoPertenceACarteira($numero)) continue;
 
     $item['tipo'] = detectarTipo($item['despacho'] ?? '');
     $item['_timestamp'] = dataParaTimestamp($item['data'] ?? '');
@@ -188,7 +190,9 @@ unset($processo);
 
 usort($processos, fn($a, $b) => $b['_timestamp'] <=> $a['_timestamp']);
 
-$filtrados = array_filter($processos, function ($item) use ($busca, $tipo) {
+$rpisDisponiveis = array_values(array_unique(array_filter(array_map(fn($i) => trim((string)($i['ultima_rpi'] ?? '')), $processos))));
+usort($rpisDisponiveis, fn($a, $b) => strnatcasecmp($b, $a));
+$filtrados = array_filter($processos, function ($item) use ($busca, $tipo, $rpiFiltro) {
     $texto = mb_strtolower(
         ($item['processo'] ?? '') . ' ' .
         ($item['marca'] ?? '') . ' ' .
@@ -200,8 +204,9 @@ $filtrados = array_filter($processos, function ($item) use ($busca, $tipo) {
 
     $okBusca = $busca === '' || str_contains($texto, mb_strtolower($busca));
     $okTipo = $tipo === 'todos' || mb_strtolower($item['tipo'] ?? '') === mb_strtolower($tipo);
+    $okRpi = $rpiFiltro === '' || (string)($item['ultima_rpi'] ?? '') === $rpiFiltro;
 
-    return $okBusca && $okTipo;
+    return $okBusca && $okTipo && $okRpi;
 });
 
 $filtrados = array_values($filtrados);
@@ -755,6 +760,8 @@ td small { color:var(--muted); }
         </select>
     </label>
 
+    <label>Revista RPI<select name="rpi"><option value="">Todas</option><?php foreach ($rpisDisponiveis as $numeroRpi): ?><option value="<?= e($numeroRpi) ?>" <?= $rpiFiltro === $numeroRpi ? 'selected' : '' ?>>RPI <?= e($numeroRpi) ?></option><?php endforeach; ?></select></label>
+
     <button type="submit" class="primary">
         Filtrar
     </button>
@@ -931,13 +938,13 @@ td small { color:var(--muted); }
 <?php if ($totalPaginas > 1): ?>
 <nav class="pagination" aria-label="Paginação dos processos">
     <?php if ($paginaAtualLista > 1): ?>
-    <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'pagina' => $paginaAtualLista - 1])) ?>">← Anterior</a>
+    <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'rpi' => $rpiFiltro, 'pagina' => $paginaAtualLista - 1])) ?>">← Anterior</a>
     <?php endif; ?>
 
     <span>Página <?= $paginaAtualLista ?> de <?= $totalPaginas ?></span>
 
     <?php if ($paginaAtualLista < $totalPaginas): ?>
-    <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'pagina' => $paginaAtualLista + 1])) ?>">Próxima →</a>
+    <a href="?<?= e(http_build_query(['busca' => $busca, 'tipo' => $tipo, 'rpi' => $rpiFiltro, 'pagina' => $paginaAtualLista + 1])) ?>">Próxima →</a>
     <?php endif; ?>
 </nav>
 <?php endif; ?>
